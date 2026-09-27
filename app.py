@@ -231,6 +231,22 @@ def login_required(fn):
     return inner
 
 
+def admin_required(fn):
+    """Managing accounts is the one thing a plain teacher cannot do: every
+    signed-in teacher may write content, but only an admin lets someone new in."""
+    @wraps(fn)
+    def inner(*a, **kw):
+        u = current_user()
+        if not u:
+            flash("Please sign in to reach the teacher area.", "warn")
+            return redirect(url_for("login", next=request.path))
+        if u["role"] != "admin":
+            flash("Only an admin can manage teacher accounts.", "error")
+            return redirect(url_for("dashboard"))
+        return fn(*a, **kw)
+    return inner
+
+
 @app.context_processor
 def inject():
     return dict(user=current_user(), SOURCES=SOURCES,
@@ -399,7 +415,7 @@ def healthz():
 def login():
     if request.method == "POST":
         u = db().execute("SELECT * FROM users WHERE username=?",
-                         (request.form.get("username", "").strip(),)).fetchone()
+                         (request.form.get("username", "").strip().lower(),)).fetchone()
         if u and check_password_hash(u["pw_hash"], request.form.get("password", "")):
             session.clear()
             session["uid"] = u["id"]
@@ -435,6 +451,60 @@ def change_password():
     return redirect(url_for("dashboard"))
 
 
+# ------------------------------------------------------------ teacher accounts
+# There is no public sign-up: a teacher gets in only when an admin creates the
+# account here, so a site on a public URL cannot be joined by a stranger.
+USERNAME_OK = re.compile(r"^[a-z0-9._-]{3,32}$")
+
+
+@app.route("/teacher/users/new", methods=["POST"])
+@admin_required
+def add_user():
+    f = request.form
+    username = f.get("username", "").strip().lower()
+    display = f.get("display_name", "").strip()
+    pw = f.get("password", "")
+    role = "admin" if f.get("role") == "admin" else "teacher"
+
+    if not USERNAME_OK.match(username):
+        flash("A username needs 3 to 32 characters: letters, digits, dot, dash "
+              "or underscore.", "error")
+    elif not display:
+        flash("Give the teacher a display name.", "error")
+    elif len(pw) < 8:
+        flash("Set a first password of at least 8 characters.", "error")
+    else:
+        try:
+            db().execute("INSERT INTO users (username,pw_hash,display_name,role,created)"
+                         " VALUES (?,?,?,?,?)",
+                         (username, generate_password_hash(pw), display, role, now()))
+            db().commit()
+            flash("Account created for %s. Ask them to sign in and change the "
+                  "password from this page." % display, "ok")
+        except sqlite3.IntegrityError:
+            flash("The username '%s' is already taken." % username, "error")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/teacher/users/<int:uid>/delete", methods=["POST"])
+@admin_required
+def delete_user(uid):
+    me = current_user()
+    target = db().execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if not target:
+        abort(404)
+    # Only an admin reaches this, and an admin cannot remove themselves, so the
+    # site can never be left without one.
+    if target["id"] == me["id"]:
+        flash("You cannot remove your own account.", "error")
+    else:
+        db().execute("DELETE FROM users WHERE id=?", (uid,))
+        db().commit()
+        flash("Removed the account for %s. Their chapters and questions stay, "
+              "still credited to them." % target["display_name"], "ok")
+    return redirect(url_for("dashboard"))
+
+
 # --------------------------------------------------------------- teacher UI
 @app.route("/teacher")
 @login_required
@@ -455,8 +525,11 @@ def dashboard():
     ch_chart, _ = bar_segments([(lbl, SOURCE_COLORS[k], counts.get(k, 0)) for k, lbl in src_order])
     q_chart, _ = bar_segments([(lbl, SOURCE_COLORS[k], qsrc.get(k, 0)) for k, lbl in src_order])
     logs = db().execute("SELECT * FROM ai_log ORDER BY id DESC LIMIT 8").fetchall()
+    teachers = db().execute("SELECT id, username, display_name, role, created FROM users"
+                            " ORDER BY role, username").fetchall()
     return render_template("dashboard.html", chapters=chapters, counts=counts,
-                           qsrc=qsrc, logs=logs, ch_chart=ch_chart, q_chart=q_chart)
+                           qsrc=qsrc, logs=logs, ch_chart=ch_chart, q_chart=q_chart,
+                           teachers=teachers)
 
 
 @app.route("/teacher/chapter/new", methods=["GET", "POST"])

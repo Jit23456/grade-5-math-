@@ -41,6 +41,23 @@ python3 app.py           # development server on http://127.0.0.1:5000
 The first run creates `data/math5.sqlite3`, seeds the 19 chapters, and creates a
 `teacher` account. Sign in at `/login` and change the password from the dashboard.
 
+### Teacher accounts
+
+There is no public sign-up, so a site on a public URL cannot be joined by a
+stranger. The first `teacher` account is an **admin**, and admins get a *Teacher
+accounts* panel on the dashboard where they add everyone else, setting each
+person's username and first password. New teachers change their own password
+after signing in.
+
+| Role | Can do |
+|---|---|
+| teacher | Write and edit chapters and questions, use the AI assistant |
+| admin | All of that, plus add and remove accounts |
+
+An admin cannot remove their own account, so the site is never left without one.
+Removing a teacher leaves their chapters and questions in place, still credited
+to them.
+
 ---
 
 ## Running under a WSGI server
@@ -293,6 +310,9 @@ attempt data is sent to the server or stored.
 | `/teacher/chapter/<n>/question/new` | teacher | Question editor |
 | `/teacher/assistant` | teacher | AI assistant |
 | `/api/ai/generate`, `/api/ai/accept` | teacher | Assistant endpoints |
+| `/teacher/password` | teacher | Change your own password |
+| `/teacher/users/new` | **admin** | Create a teacher account |
+| `/teacher/users/<id>/delete` | **admin** | Remove a teacher account |
 
 ---
 

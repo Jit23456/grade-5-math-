@@ -57,7 +57,11 @@ a{color:var(--blue)}
 .badge.curriculum{background:var(--blue-wash);border-color:#c5daf3;color:#14539e}
 .badge.manual{background:var(--green-wash);border-color:#b6ddcd;color:#12513c}
 .badge.ai{background:var(--amber-wash);border-color:#eddaa9;color:#6b4c07}
-.badge.draft{background:#eef2f3;border-color:var(--rule);color:var(--ink-2)}
+/* The assistant's `.draft` card further down sets its own padding and radius.
+   Both selectors are one class, so the later one would win and blow this pill
+   up to card size; restating the shape here keeps the badge a badge. */
+.badge.draft{background:#eef2f3;border-color:var(--rule);color:var(--ink-2);
+  padding:2px 9px;border-radius:11px;margin:0}
 
 /* ---------------- chapter index cards ---------------- */
 main{padding:44px 0 80px}
