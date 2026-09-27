@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% import "_charts.html" as charts %}
+{% block title %}{{ course }} &middot; BC Curriculum{% endblock %}
+{% block body %}
+
+<div class="hero"><div class="wrap">
+  <div class="crumb">BC MINISTRY OF EDUCATION &middot; MATHEMATICS 5 &middot; CORE</div>
+  <h1>Mathematics 5: the complete course</h1>
+  <p class="lede">One chapter for every content learning standard in the British Columbia
+  Grade 5 Mathematics curriculum. Concepts in plain language, worked examples, and an
+  assessment at the end of each chapter.</p>
+  <div class="stats">
+    <div class="stat"><b>{{ stats.chapters }}</b><span>CHAPTERS</span></div>
+    <div class="stat"><b>{{ stats.lessons }}</b><span>LESSONS</span></div>
+    <div class="stat"><b>{{ stats.questions }}</b><span>QUESTIONS</span></div>
+    <div class="stat"><b>{{ stats.standards }}</b><span>STANDARDS COVERED</span></div>
+  </div>
+</div></div>
+
+<main><div class="wrap">
+
+  <p class="eyebrow">Coverage</p>
+  <h2 class="sec">Every Grade 5 content standard, accounted for</h2>
+  <p class="intro">The BC Mathematics 5 curriculum lists 19 content learning standards.
+  Each one is a chapter below, grouped by the Big Idea it belongs to. Open a chapter to
+  read the lessons and take its assessment.</p>
+
+  <div class="chartrow">
+    <div class="chartcard"><h4>Chapters by strand</h4>
+      {{ charts.stackbar(strand_chart, stats.chapters, 'Chapters per strand') }}</div>
+    <div class="chartcard"><h4>Questions by type, course-wide</h4>
+      {{ charts.stackbar(type_chart, stats.questions, 'Question types across the course') }}</div>
+  </div>
+
+  {% for strand, chs in by_strand %}
+    <div class="strandhead">{{ strand }} &middot; {{ chs|length }} chapter{{ '' if chs|length == 1 else 's' }}</div>
+    <div class="grid">
+      {% for c in chs %}
+      <a class="chcard" href="{{ url_for('chapter', number=c.number) }}">
+        <div class="n">CHAPTER {{ '%02d'|format(c.number) }}</div>
+        <h3>{{ c.title }}</h3>
+        <p>{{ c.lede }}</p>
+        <div class="meta">
+          <span>{{ c.lessons }} lessons</span>
+          <span>{{ c.nq }} questions</span>
+          <span class="badge {{ c.source }}">{{ SOURCES[c.source][0] if c.source in SOURCES else c.source }}</span>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  {% endfor %}
+
+  <div class="strandhead" style="margin-top:44px">Standards checklist</div>
+  <table class="data">
+    <tr><th style="width:44px">Ch</th><th>BC content standard</th><th style="width:170px">Strand</th>
+        <th class="c" style="width:70px">Lessons</th><th class="c" style="width:80px">Questions</th></tr>
+    {% for c in chapters %}
+    <tr>
+      <td class="c">{{ c.number }}</td>
+      <td><a href="{{ url_for('chapter', number=c.number) }}">{{ c.standard or c.title }}</a></td>
+      <td>{{ c.strand }}</td>
+      <td class="c">{{ c.lessons }}</td>
+      <td class="c">{{ c.nq }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  {% if not user %}
+  <div class="strandhead" style="margin-top:44px">For teachers</div>
+  <p class="intro">Teachers can add their own chapters and questions, or draft them with
+  the built-in AI assistant. Everything you add is labelled with its origin, so a reader
+  can always tell curriculum text from teacher-written text from an AI draft.
+  <a href="{{ url_for('login') }}">Sign in</a> to get started.</p>
+  {% endif %}
+
+</div></main>
+{% endblock %}

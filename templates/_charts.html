@@ -1,0 +1,16 @@
+{% macro stackbar(segments, total, caption='') %}
+{% if segments %}
+<div class="chart" role="img" aria-label="{{ caption }} — {% for s in segments %}{{ s.label }} {{ s.count }}{{ ', ' if not loop.last }}{% endfor %}">
+  <svg viewBox="0 0 200 14" preserveAspectRatio="none" class="chartbar">
+    {% for s in segments %}
+    <rect x="{{ s.x }}" y="0" width="{{ s.width }}" height="14" rx="4" fill="{{ s.color }}"><title>{{ s.label }}: {{ s.count }} ({{ s.pct }}%)</title></rect>
+    {% endfor %}
+  </svg>
+  <ul class="chartlegend">
+    {% for s in segments %}
+    <li><span class="swatch" style="background:{{ s.color }}"></span>{{ s.label }} <b>{{ s.count }}</b><span class="pct">{{ s.pct }}%</span></li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endmacro %}

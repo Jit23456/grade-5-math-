@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ course }}{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div class="top"><div class="wrap">
+  <a class="logo" href="{{ url_for('index') }}">{{ course }}<span>BC CURRICULUM &middot; GRADE {{ grade }}</span></a>
+  <nav>
+    <a href="{{ url_for('index') }}" {% if request.endpoint=='index' %}class="on"{% endif %}>Chapters</a>
+    {% if user %}
+      <a href="{{ url_for('dashboard') }}" {% if request.endpoint=='dashboard' %}class="on"{% endif %}>Dashboard</a>
+      <a href="{{ url_for('edit_chapter') }}">Add chapter</a>
+      <a class="pill" href="{{ url_for('assistant') }}">AI assistant</a>
+      <a href="{{ url_for('logout') }}">Sign out</a>
+    {% else %}
+      <a href="{{ url_for('login') }}">Teacher sign in</a>
+    {% endif %}
+  </nav>
+</div></div>
+
+{% with msgs = get_flashed_messages(with_categories=true) %}
+{% if msgs %}<div class="flashes">
+  {% for cat, m in msgs %}<div class="flash {{ cat }}">{{ m }}</div>{% endfor %}
+</div>{% endif %}
+{% endwith %}
+
+{% block body %}{% endblock %}
+
+<footer><div class="wrap">
+  <span>{{ course }} &middot; aligned to the BC Grade {{ grade }} learning standards</span>
+  <span><a href="{{ url_for('course_json') }}">course.json</a> &middot; <a href="{{ url_for('healthz') }}">health</a></span>
+</div></footer>
+{% block scripts %}{% endblock %}
+</body>
+</html>

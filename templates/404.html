@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Not found &middot; {{ course }}{% endblock %}
+{% block body %}
+<main><div class="wrap narrow">
+  <h2 class="sec">That page is not here</h2>
+  <p class="intro">The chapter or page you asked for does not exist, or has not been published yet.</p>
+  <a class="btn blue" href="{{ url_for('index') }}">Back to the chapter list</a>
+</div></main>
+{% endblock %}

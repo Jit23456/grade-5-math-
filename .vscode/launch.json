@@ -1,0 +1,46 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run the site (development)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/app.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "env": {
+        "MATH5_SECRET_KEY": "dev-only-not-for-production",
+        "MATH5_ADMIN_PASSWORD": "teacher1234",
+        "PORT": "5000"
+      }
+    },
+    {
+      "name": "Run with the AI assistant on",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/app.py",
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "MATH5_SECRET_KEY": "dev-only-not-for-production",
+        "MATH5_ADMIN_PASSWORD": "teacher1234",
+        "ANTHROPIC_API_KEY": "${env:ANTHROPIC_API_KEY}",
+        "PORT": "5000"
+      }
+    },
+    {
+      "name": "Run under gunicorn (as in production)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "gunicorn",
+      "args": ["-w", "4", "-b", "127.0.0.1:8000", "wsgi:application"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "env": {
+        "MATH5_SECRET_KEY": "dev-only-not-for-production",
+        "MATH5_ADMIN_PASSWORD": "teacher1234"
+      }
+    }
+  ]
+}

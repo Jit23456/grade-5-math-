@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if q else 'New' }} question &middot; {{ course }}{% endblock %}
+{% block body %}
+<main><div class="wrap narrow">
+  <p class="eyebrow">Chapter {{ ch.number }} &middot; {{ ch.title }}</p>
+  <h2 class="sec">{{ 'Edit question' if q else 'Add a question' }}</h2>
+  <p class="intro">Pick a type, write the stem, then mark the correct answer.</p>
+
+  <form class="card" method="post" id="qform">
+    <div class="row">
+      <div class="field"><label for="type">Question type</label>
+        <select id="type" name="type">
+          <option value="mcq" {% if q and q.type=='mcq' %}selected{% endif %}>Multiple choice (one correct)</option>
+          <option value="multi" {% if q and q.type=='multi' %}selected{% endif %}>Multi-select (two or more correct)</option>
+          <option value="fill" {% if q and q.type=='fill' %}selected{% endif %}>Fill in the blank</option>
+        </select></div>
+      <div class="field"><label for="difficulty">Difficulty</label>
+        <select id="difficulty" name="difficulty">
+          {% for d in ['easy','medium','hard'] %}
+          <option value="{{ d }}" {% if q and q.difficulty==d %}selected{% endif %}>{{ d }}</option>
+          {% endfor %}
+        </select></div>
+    </div>
+
+    <div class="field"><label for="stem">Question</label>
+      <textarea id="stem" name="stem" rows="3" required>{{ q.stem if q else (prefill.stem if prefill else '') }}</textarea></div>
+
+    <div id="choicebox">
+      <div class="field"><label for="options">Options</label>
+        <p class="hint">One per line, in the order students will see them. Two to six options.</p>
+        <textarea id="options" name="options" rows="5">{{ q.options|join('\n') if q else '' }}</textarea></div>
+      <div class="field"><label>Which are correct?</label>
+        <p class="hint">Tick by position. Multiple choice needs exactly one; multi-select needs two or more.</p>
+        <div id="correctbox" style="display:flex;gap:16px;flex-wrap:wrap">
+          {% for i in range(6) %}
+          <label class="check"><input type="checkbox" name="correct" value="{{ i }}"
+            {% if q and i in q.answer %}checked{% endif %}> {{ 'ABCDEF'[i] }}</label>
+          {% endfor %}
+        </div></div>
+    </div>
+
+    <div id="fillbox">
+      <div class="field"><label for="accept">Accepted answers</label>
+        <p class="hint">One per line. Include every form a student might type, for example
+          <code>3800000</code> and <code>3 800 000</code>. Spaces, commas and dollar signs are
+          ignored when marking.</p>
+        <textarea id="accept" name="accept" rows="4">{{ q.accept|join('\n') if q else '' }}</textarea></div>
+      <div class="row">
+        <div class="field"><label for="display_answer">Answer to show</label>
+          <input id="display_answer" type="text" name="display_answer"
+                 value="{{ q.display_answer if q and q.type=='fill' else '' }}"></div>
+        <div class="field"><label for="unit">Unit label (optional)</label>
+          <p class="hint">Shown beside the input, e.g. <code>cm</code>.</p>
+          <input id="unit" type="text" name="unit" value="{{ q.unit if q else '' }}"></div>
+      </div>
+    </div>
+
+    <div class="field"><label for="visual">Diagram (optional)</label>
+      <p class="hint">Raw SVG markup, shown above the answer box. Leave blank for no diagram.</p>
+      <textarea id="visual" name="visual" rows="3">{{ q.visual if q else '' }}</textarea></div>
+
+    <div class="field"><label for="explanation">Explanation</label>
+      <p class="hint">Shown after the student checks their answer. Say why the answer is right.</p>
+      <textarea id="explanation" name="explanation" rows="3">{{ q.explanation if q else '' }}</textarea></div>
+
+    <div class="field"><label for="skill_tag">Skill tag (optional)</label>
+      <p class="hint">A short kebab-case label, e.g. <code>rounding-decimals</code>.</p>
+      <input id="skill_tag" type="text" name="skill_tag" value="{{ q.skill_tag if q else '' }}"></div>
+
+    {% if not q %}
+    <div class="field"><label for="source">How was this written?</label>
+      <select id="source" name="source">
+        <option value="manual">Teacher written, by hand</option>
+        <option value="ai">AI draft, reviewed by me</option>
+      </select></div>
+    {% endif %}
+
+    <button class="btn blue" type="submit">{{ 'Save question' if q else 'Add question' }}</button>
+    <a class="btn light" href="{{ url_for('questions_list', number=ch.number) }}">Cancel</a>
+  </form>
+</div></main>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const sel = document.getElementById('type');
+function sync() {
+  const fill = sel.value === 'fill';
+  document.getElementById('fillbox').style.display = fill ? 'block' : 'none';
+  document.getElementById('choicebox').style.display = fill ? 'none' : 'block';
+  const boxes = document.querySelectorAll('#correctbox input');
+  boxes.forEach(b => b.type = 'checkbox');
+  if (sel.value === 'mcq') {
+    boxes.forEach(b => b.addEventListener('change', onlyOne));
+  }
+}
+function onlyOne(e) {
+  if (!e.target.checked) return;
+  document.querySelectorAll('#correctbox input').forEach(b => { if (b !== e.target) b.checked = false; });
+}
+sel.addEventListener('change', sync);
+sync();
+</script>
+{% endblock %}

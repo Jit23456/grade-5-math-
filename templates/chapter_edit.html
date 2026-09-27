@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if c else 'New' }} chapter &middot; {{ course }}{% endblock %}
+{% block body %}
+<main><div class="wrap narrow">
+  <p class="eyebrow">Teacher area</p>
+  <h2 class="sec">{% if c %}Edit chapter {{ c.number }}{% else %}Write a new chapter{% endif %}</h2>
+  <p class="intro">{% if c and c.source == 'curriculum' %}This chapter came from the BC
+    curriculum. Saving your edits relabels it as teacher written, so readers can see it
+    has been changed.{% else %}Fill in as much or as little as you like. Only the number
+    and title are required.{% endif %}</p>
+
+  <form class="card" method="post">
+    <div class="row">
+      <div class="field"><label for="number">Chapter number</label>
+        <input id="number" type="number" name="number" min="1" required
+               value="{{ c.number if c else next_number }}"></div>
+      <div class="field"><label for="strand">Strand (Big Idea group)</label>
+        <select id="strand" name="strand">
+          {% for s in strands %}
+          <option value="{{ s }}" {% if c and c.strand == s %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select></div>
+    </div>
+
+    <div class="field"><label for="title">Title</label>
+      <input id="title" type="text" name="title" required
+             value="{{ c.title if c else (prefill.title if prefill else '') }}"></div>
+
+    <div class="field"><label for="lede">One-line summary</label>
+      <p class="hint">Shown on the chapter card and under the title.</p>
+      <input id="lede" type="text" name="lede" value="{{ c.lede if c else '' }}"></div>
+
+    <div class="field"><label for="standard">BC content standard</label>
+      <p class="hint">The exact wording from the curriculum page, if this chapter maps to one.</p>
+      <input id="standard" type="text" name="standard" value="{{ c.standard if c else '' }}"></div>
+
+    <div class="field"><label for="big_idea">Big Idea</label>
+      <input id="big_idea" type="text" name="big_idea" value="{{ c.big_idea if c else '' }}"></div>
+
+    <div class="field"><label for="elaborations">Elaborations</label>
+      <p class="hint">One per line.</p>
+      <textarea id="elaborations" name="elaborations" rows="3">{{ c.elaborations|join('\n') if c else '' }}</textarea></div>
+
+    <div class="field"><label for="goals">Learning goals</label>
+      <p class="hint">One per line. Numbered automatically.</p>
+      <textarea id="goals" name="goals" rows="5">{{ c.goals|join('\n') if c else '' }}</textarea></div>
+
+    <div class="field"><label for="vocab">Key vocabulary</label>
+      <p class="hint">One per line, in the form <code>Term | meaning</code>.</p>
+      <textarea id="vocab" name="vocab" rows="5">{{ c.vocab_text if c else '' }}</textarea></div>
+
+    <div class="field"><label for="body_md">Lessons (Markdown)</label>
+      <p class="hint">Start each lesson with <code>### Lesson 1.1 - Title</code>. Tables, fenced
+      code blocks and <code>&gt; **Watch out.**</code> blockquotes all render. Paste an AI draft here if you have one.</p>
+      <textarea id="body_md" name="body_md" rows="22">{{ c.body_md if c else (prefill.body if prefill else '') }}</textarea></div>
+
+    <div class="field"><label for="visual">Hero diagram (optional)</label>
+      <p class="hint">Raw SVG markup, shown at the top of the chapter. Leave blank for no diagram.</p>
+      <textarea id="visual" name="visual" rows="4">{{ c.visual if c else '' }}</textarea></div>
+
+    <div class="field"><label for="summary">Chapter summary points</label>
+      <p class="hint">One per line.</p>
+      <textarea id="summary" name="summary" rows="5">{{ c.summary|join('\n') if c else '' }}</textarea></div>
+
+    {% if not c %}
+    <div class="field"><label for="source">How was this written?</label>
+      <select id="source" name="source">
+        <option value="manual">Teacher written, by hand</option>
+        <option value="ai">AI draft, reviewed by me</option>
+      </select></div>
+    {% endif %}
+
+    <div class="field"><label class="check">
+      <input type="checkbox" name="published" {% if not c or c.published %}checked{% endif %}>
+      Publish this chapter so students can read it</label></div>
+
+    <button class="btn blue" type="submit">{{ 'Save chapter' if c else 'Create chapter' }}</button>
+    {% if c %}
+    <a class="btn light" href="{{ url_for('chapter', number=c.number) }}">Cancel</a>
+    {% endif %}
+  </form>
+
+  {% if c %}
+  <form method="post" action="{{ url_for('delete_chapter', number=c.number) }}" style="margin-top:22px"
+        onsubmit="return confirm('Delete chapter {{ c.number }} and all its questions? This cannot be undone.')">
+    <button class="btn danger" type="submit">Delete chapter {{ c.number }}</button>
+  </form>
+  {% endif %}
+</div></main>
+{% endblock %}

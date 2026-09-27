@@ -1,0 +1,47 @@
+# Render blueprint. In the Render dashboard: New > Blueprint, point it at this
+# repository, and the web service below is created from this file.
+#
+# The free plan has no persistent disk, so the SQLite file starts empty on every
+# deploy and restart. That is survivable here: wsgi.py calls init_db() on import,
+# which reseeds all 19 chapters and 380 questions from data/seed.json whenever the
+# chapters table is empty. Students always get the full course. What does not
+# survive a restart is anything a teacher writes through the UI.
+#
+# To keep teacher-written content, move to a paid instance and add a disk:
+#
+#   plan: starter
+#   disk:
+#     name: math5-data
+#     mountPath: /app/data
+#     sizeGB: 1
+#
+# and set MATH5_DB to /app/data/math5.sqlite3 (which is already the default).
+
+services:
+  - type: web
+    name: math5-platform
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      # Signs session cookies. Render generates one and keeps it across deploys,
+      # so teachers are not signed out every time the service restarts.
+      - key: MATH5_SECRET_KEY
+        generateValue: true
+
+      # Read only when the users table is empty. Setting it here means the same
+      # teacher password is recreated after each restart on the free plan, instead
+      # of a random one being buried in the logs. Set the value in the dashboard.
+      - key: MATH5_ADMIN_PASSWORD
+        sync: false
+
+      # Leave unset to keep the AI assistant switched off. Add it in the dashboard
+      # to switch it on; the rest of the app works either way.
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+      # Two gunicorn workers fit the 512 MB free instance.
+      - key: WEB_CONCURRENCY
+        value: 2

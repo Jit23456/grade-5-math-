@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Questions &middot; Ch {{ ch.number }} &middot; {{ course }}{% endblock %}
+{% block body %}
+<main><div class="wrap">
+  <p class="eyebrow">Chapter {{ ch.number }} &middot; {{ ch.title }}</p>
+  <h2 class="sec">Assessment questions</h2>
+  <p class="intro">{{ questions|length }} question{{ '' if questions|length == 1 else 's' }} in this chapter.
+    <a class="btn blue sm" href="{{ url_for('edit_question', number=ch.number) }}">Add a question</a>
+    <a class="btn light sm" href="{{ url_for('chapter', number=ch.number) }}">View chapter</a></p>
+
+  {% if questions %}
+  <table class="data">
+    <tr><th class="c" style="width:40px">#</th><th style="width:120px">Type</th><th>Stem</th>
+        <th style="width:110px">Origin</th><th style="width:150px">Actions</th></tr>
+    {% for q in questions %}
+    <tr>
+      <td class="c">{{ loop.index }}</td>
+      <td>{{ {'mcq':'Multiple choice','multi':'Multi-select','fill':'Fill in the blank'}[q.type] }}</td>
+      <td>{{ q.stem[:110] }}{% if q.stem|length > 110 %}&hellip;{% endif %}
+        <div style="font-family:var(--mono);font-size:11px;color:var(--ink-2);margin-top:3px">
+          answer: {{ q.display_answer }} &middot; {{ q.difficulty }}{% if q.skill_tag %} &middot; {{ q.skill_tag }}{% endif %}</div></td>
+      <td><span class="badge {{ q.source }}">{{ SOURCES[q.source][0] if q.source in SOURCES else q.source }}</span></td>
+      <td>
+        <a class="btn light sm" href="{{ url_for('edit_question', number=ch.number, qid=q.id) }}">Edit</a>
+        <form method="post" action="{{ url_for('delete_question', qid=q.id) }}" style="display:inline"
+              onsubmit="return confirm('Delete this question? This cannot be undone.')">
+          <button class="btn danger sm" type="submit">Delete</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="intro">No questions yet.</p>
+  {% endif %}
+</div></main>
+{% endblock %}

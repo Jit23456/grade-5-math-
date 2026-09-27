@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Teacher sign in &middot; {{ course }}{% endblock %}
+{% block body %}
+<main><div class="wrap narrow">
+  <p class="eyebrow">Teacher area</p>
+  <h2 class="sec">Sign in</h2>
+  <p class="intro">Signing in lets you write chapters and questions by hand, or draft them with the AI assistant. Students do not need an account to read the course.</p>
+  <form class="card" method="post" style="max-width:440px">
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="field">
+      <label for="u">Username</label>
+      <input id="u" type="text" name="username" autocomplete="username" required autofocus>
+    </div>
+    <div class="field">
+      <label for="p">Password</label>
+      <input id="p" type="password" name="password" autocomplete="current-password" required>
+    </div>
+    <button class="btn blue" type="submit">Sign in</button>
+  </form>
+</div></main>
+{% endblock %}

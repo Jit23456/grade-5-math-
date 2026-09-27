@@ -1,0 +1,10 @@
+# The image builds its own dependencies from requirements.txt, and the database
+# is a mounted volume — neither belongs in the build context.
+.venv/
+venv/
+__pycache__/
+*.pyc
+data/*.sqlite3
+.env
+.git/
+.vscode/
