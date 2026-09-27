@@ -25,7 +25,7 @@
       "env": {
         "MATH5_SECRET_KEY": "dev-only-not-for-production",
         "MATH5_ADMIN_PASSWORD": "teacher1234",
-        "ANTHROPIC_API_KEY": "${env:ANTHROPIC_API_KEY}",
+        "GROQ_API_KEY": "${env:GROQ_API_KEY}",
         "PORT": "5000"
       }
     },

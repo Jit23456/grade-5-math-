@@ -20,11 +20,20 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("MATH5_DB", os.path.join(BASE, "data", "math5.sqlite3"))
 SEED_PATH = os.path.join(BASE, "data", "seed.json")
 
-# --- AI assistant configuration -------------------------------------------
-API_URL = os.environ.get("ANTHROPIC_API_URL", "https://api.anthropic.com/v1/messages").strip()
-API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
-API_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-5").strip()
-API_VERSION = "2023-06-01"
+# Load a local .env file if there is one. Values already in the environment win.
+_ENV_PATH = os.path.join(BASE, ".env")
+if os.path.exists(_ENV_PATH):
+    with open(_ENV_PATH, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ.setdefault(k.strip(), v.strip().strip("'\""))
+
+# --- AI assistant configuration (Groq) ------------------------------------
+API_URL = os.environ.get("GROQ_API_URL", "https://api.groq.com/openai/v1/chat/completions").strip()
+API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
+API_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b").strip()
 
 SOURCES = {
     "curriculum": ("Curriculum", "Seeded from the BC learning standards"),
@@ -1003,21 +1012,22 @@ Six to eight terms. No preamble, no numbering, no markdown formatting.""",
 }
 
 
-def call_claude(system, user, max_tokens=2000):
-    """POST to the Claude Messages API. Returns (text, error)."""
+def call_ai(system, user, max_tokens=2000):
+    """POST to the Groq chat completions API. Returns (text, error)."""
     if not API_KEY:
         return None, ("The AI assistant is switched off because no API key is set. "
-                      "Set ANTHROPIC_API_KEY in the environment and restart the server.")
+                      "Set GROQ_API_KEY in the environment and restart the server.")
     payload = json.dumps({
         "model": API_MODEL,
         "max_tokens": max_tokens,
-        "system": system,
-        "messages": [{"role": "user", "content": user}],
+        "messages": [{"role": "system", "content": system},
+                     {"role": "user", "content": user}],
     }).encode()
     req = urllib.request.Request(API_URL, data=payload, method="POST", headers={
         "content-type": "application/json",
-        "x-api-key": API_KEY,
-        "anthropic-version": API_VERSION,
+        "authorization": "Bearer " + API_KEY,
+        # Groq rejects urllib's default User-Agent.
+        "user-agent": "math5-platform/1.0",
     })
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
@@ -1032,8 +1042,10 @@ def call_claude(system, user, max_tokens=2000):
         return None, "Could not reach the API: %s" % e.reason
     except Exception as e:
         return None, "Unexpected error: %s" % e
-    text = "".join(b.get("text", "") for b in body.get("content", [])
-                   if b.get("type") == "text").strip()
+    try:
+        text = (body["choices"][0]["message"].get("content") or "").strip()
+    except (KeyError, IndexError, TypeError):
+        text = ""
     if not text:
         return None, "The API returned no text."
     return text, None
@@ -1086,7 +1098,7 @@ def ai_generate():
     if context:
         user += "\n\nExisting material for reference:\n%s" % context[:6000]
 
-    text, err = call_claude(PROMPTS[kind], user.strip(),
+    text, err = call_ai(PROMPTS[kind], user.strip(),
                             max_tokens=3000 if kind == "questions" else 2000)
     if err:
         log_ai(kind, topic or context[:80], False, err)

@@ -5,8 +5,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 ENV PORT=8000
 EXPOSE 8000
-# Pass MATH5_SECRET_KEY and (optionally) ANTHROPIC_API_KEY at run time:
-#   docker run -p 8000:8000 -e MATH5_SECRET_KEY=... -e ANTHROPIC_API_KEY=... -v $PWD/data:/app/data math5
+# Pass MATH5_SECRET_KEY and (optionally) GROQ_API_KEY at run time:
+#   docker run -p 8000:8000 -e MATH5_SECRET_KEY=... -e GROQ_API_KEY=... -v $PWD/data:/app/data math5
 #
 # PORT and WEB_CONCURRENCY are read at start-up: a host that assigns its own port
 # (Render, Fly, Cloud Run, Koyeb) is followed without editing this file, and a small

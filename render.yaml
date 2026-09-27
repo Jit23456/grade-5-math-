@@ -38,8 +38,9 @@ services:
         sync: false
 
       # Leave unset to keep the AI assistant switched off. Add it in the dashboard
-      # to switch it on; the rest of the app works either way.
-      - key: ANTHROPIC_API_KEY
+      # to switch it on; the rest of the app works either way. Free keys come from
+      # https://console.groq.com/keys
+      - key: GROQ_API_KEY
         sync: false
 
       # Sends the sign-up code by SMS. Left unset, teachers can still sign up but

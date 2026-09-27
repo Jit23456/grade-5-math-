@@ -33,7 +33,7 @@ export MATH5_ADMIN_PASSWORD='choose-something-long'
 export MATH5_SECRET_KEY="$(python3 -c 'import secrets;print(secrets.token_hex(32))')"
 
 # Optional: switches the AI assistant on.
-export ANTHROPIC_API_KEY='sk-ant-...'
+export GROQ_API_KEY='gsk_...'   # free key from https://console.groq.com/keys
 
 python3 app.py           # development server on http://127.0.0.1:5000
 ```
@@ -150,7 +150,7 @@ After=network.target
 User=www-data
 WorkingDirectory=/srv/math5/app
 Environment="MATH5_SECRET_KEY=change-me"
-Environment="ANTHROPIC_API_KEY=sk-ant-..."
+Environment="GROQ_API_KEY=gsk_..."
 ExecStart=/srv/math5/venv/bin/gunicorn -w 4 -b 127.0.0.1:8000 wsgi:application
 Restart=on-failure
 
@@ -190,7 +190,7 @@ Then press **F5**. Three run configurations are included:
 | Configuration | What it does |
 |---|---|
 | Run the site (development) | Flask's own server on <http://127.0.0.1:5000>, with breakpoints |
-| Run with the AI assistant on | The same, passing your shell's `ANTHROPIC_API_KEY` through |
+| Run with the AI assistant on | The same, passing your shell's `GROQ_API_KEY` through |
 | Run under gunicorn (as in production) | Four workers on port 8000, matching the deployed setup |
 
 The first two create a `teacher` account with the password `teacher1234`, which is
@@ -225,9 +225,9 @@ already in `.gitignore`.
 | `MATH5_SECRET_KEY` | random each start | Signs session cookies. **Set this in production**, or everyone is signed out on every restart. |
 | `MATH5_DB` | `app/data/math5.sqlite3` | Database file path. |
 | `MATH5_ADMIN_PASSWORD` | generated and printed | Password for the first `teacher` account. Only read on first run. |
-| `ANTHROPIC_API_KEY` | unset | Switches the AI assistant on. Without it the assistant explains that it is off and everything else works. |
-| `ANTHROPIC_MODEL` | `claude-sonnet-5` | Model the assistant calls. |
-| `ANTHROPIC_API_URL` | `https://api.anthropic.com/v1/messages` | Override to route through a gateway or proxy. |
+| `GROQ_API_KEY` | unset | Switches the AI assistant on. Without it the assistant explains that it is off and everything else works. |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | Model the assistant calls. |
+| `GROQ_API_URL` | `https://api.groq.com/openai/v1/chat/completions` | Override to route through a gateway or proxy. |
 | `TWILIO_ACCOUNT_SID` | unset | Texts the sign-up code. Without all three, the code goes to the server log instead. |
 | `TWILIO_AUTH_TOKEN` | unset | Twilio auth token. |
 | `TWILIO_FROM_NUMBER` | unset | The Twilio number the code is sent from. |
