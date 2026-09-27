@@ -43,20 +43,50 @@ The first run creates `data/math5.sqlite3`, seeds the 19 chapters, and creates a
 
 ### Teacher accounts
 
-There is no public sign-up, so a site on a public URL cannot be joined by a
-stranger. The first `teacher` account is an **admin**, and admins get a *Teacher
-accounts* panel on the dashboard where they add everyone else, setting each
-person's username and first password. New teachers change their own password
-after signing in.
+Teachers sign themselves up at `/signup` with a mobile number:
+
+1. They give their name, mobile number and a password.
+2. A six digit code is texted to that number. Nothing is written to the `users`
+   table yet — the pending sign-up waits in `signup_otp`, with the code stored
+   hashed, never in the clear.
+3. Entering the code creates the account and signs them in.
+
+Afterwards they sign in with **either** their mobile number or the username
+generated for them. Numbers are compared in a normalised form, so
+`+1 (604) 555-0132` and `+16045550132` are the same person.
+
+A code lasts ten minutes, survives five wrong guesses before it is destroyed, and
+can be resent at most five times with a minute between sends. One account per
+number.
 
 | Role | Can do |
 |---|---|
 | teacher | Write and edit chapters and questions, use the AI assistant |
-| admin | All of that, plus add and remove accounts |
+| admin | All of that, plus see every account and remove one |
 
-An admin cannot remove their own account, so the site is never left without one.
-Removing a teacher leaves their chapters and questions in place, still credited
-to them.
+Everyone who signs up is a plain **teacher**. The seeded `teacher` account is the
+**admin**, and can still add accounts by hand and remove anyone — useful for
+removing a sign-up that should not have happened. An admin cannot remove their
+own account, so the site is never left without one. Removing someone leaves their
+chapters and questions in place, still credited to them.
+
+> **Worth knowing before you publish.** A texted code proves someone controls that
+> phone, not that they teach at your school. On a public URL, anyone who can
+> receive a text can create an account and edit the curriculum. Watch the account
+> list, or keep the site private.
+
+### Sending the codes
+
+Set these three and codes are texted through Twilio:
+
+| Variable | Where it comes from |
+|---|---|
+| `TWILIO_ACCOUNT_SID` | Twilio console |
+| `TWILIO_AUTH_TOKEN` | Twilio console |
+| `TWILIO_FROM_NUMBER` | a number Twilio has issued you, in `+1...` form |
+
+Leave them unset and sign-up still works for testing: the code is printed to the
+server log instead of being sent, and the verify page says so.
 
 ---
 
@@ -198,6 +228,9 @@ already in `.gitignore`.
 | `ANTHROPIC_API_KEY` | unset | Switches the AI assistant on. Without it the assistant explains that it is off and everything else works. |
 | `ANTHROPIC_MODEL` | `claude-sonnet-5` | Model the assistant calls. |
 | `ANTHROPIC_API_URL` | `https://api.anthropic.com/v1/messages` | Override to route through a gateway or proxy. |
+| `TWILIO_ACCOUNT_SID` | unset | Texts the sign-up code. Without all three, the code goes to the server log instead. |
+| `TWILIO_AUTH_TOKEN` | unset | Twilio auth token. |
+| `TWILIO_FROM_NUMBER` | unset | The Twilio number the code is sent from. |
 | `PORT` | `5000` | Development server port only. |
 
 ---
@@ -303,7 +336,9 @@ attempt data is sent to the server or stored.
 | `/chapter/<n>` | anyone | One chapter, with its assessment |
 | `/api/course.json` | anyone | The whole course as JSON |
 | `/healthz` | anyone | Status, chapter count, whether the AI is configured |
-| `/login`, `/logout` | anyone | Teacher sign in |
+| `/login`, `/logout` | anyone | Teacher sign in, by mobile number or username |
+| `/signup` | anyone | Teacher sign up, sends the code |
+| `/signup/verify` | anyone | Enter the code, creates the account |
 | `/teacher` | teacher | Dashboard |
 | `/teacher/chapter/new`, `/teacher/chapter/<n>/edit` | teacher | Chapter editor |
 | `/teacher/chapter/<n>/questions` | teacher | Question list |

@@ -8,7 +8,8 @@
   <form class="card" method="post" style="max-width:440px">
     <input type="hidden" name="next" value="{{ next }}">
     <div class="field">
-      <label for="u">Username</label>
+      <label for="u">Mobile number or username</label>
+      <p class="hint">If you signed up by mobile, use that number with the country code.</p>
       <input id="u" type="text" name="username" autocomplete="username" required autofocus>
     </div>
     <div class="field">
@@ -17,5 +18,8 @@
     </div>
     <button class="btn blue" type="submit">Sign in</button>
   </form>
+
+  <p style="margin-top:20px">New here?
+    <a href="{{ url_for('signup') }}">Sign up with your mobile number</a>.</p>
 </div></main>
 {% endblock %}

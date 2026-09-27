@@ -42,6 +42,16 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
 
+      # Sends the sign-up code by SMS. Left unset, teachers can still sign up but
+      # the code is written to the service log rather than texted, so only someone
+      # who can read the logs can complete a sign-up.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+
       # Two gunicorn workers fit the 512 MB free instance.
       - key: WEB_CONCURRENCY
         value: 2

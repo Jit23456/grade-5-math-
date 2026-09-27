@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Enter your code &middot; {{ course }}{% endblock %}
+{% block body %}
+<main><div class="wrap narrow">
+  <p class="eyebrow">Teacher area</p>
+  <h2 class="sec">Enter your code</h2>
+  <p class="intro">We sent a six digit code to <b>{{ phone }}</b>. Enter it below to
+  finish creating your account. The code expires in ten minutes.</p>
+
+  {% if not sms_ready %}
+  <div class="warnbox"><b>Text messaging is not switched on for this site</b>
+  No SMS provider is configured, so the code was written to the server log rather
+  than texted. Set <code>TWILIO_ACCOUNT_SID</code>, <code>TWILIO_AUTH_TOKEN</code>
+  and <code>TWILIO_FROM_NUMBER</code> to send real messages.</div>
+  {% endif %}
+
+  <form class="card" method="post" style="max-width:420px">
+    <div class="field">
+      <label for="code">Six digit code</label>
+      <input id="code" type="text" name="code" inputmode="numeric" pattern="[0-9 ]*"
+             autocomplete="one-time-code" maxlength="7" required autofocus
+             style="font-family:var(--mono);font-size:22px;letter-spacing:.35em">
+    </div>
+    <button class="btn blue" type="submit">Verify and sign in</button>
+  </form>
+
+  <form method="post" style="margin-top:16px">
+    <input type="hidden" name="resend" value="1">
+    <button class="btn light sm" type="submit">Send the code again</button>
+  </form>
+
+  <p style="margin-top:20px"><a href="{{ url_for('signup') }}">Use a different number</a></p>
+</div></main>
+{% endblock %}

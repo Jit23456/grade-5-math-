@@ -21,7 +21,8 @@
       <a class="pill" href="{{ url_for('assistant') }}">AI assistant</a>
       <a href="{{ url_for('logout') }}">Sign out</a>
     {% else %}
-      <a href="{{ url_for('login') }}">Teacher sign in</a>
+      <a href="{{ url_for('login') }}" {% if request.endpoint=='login' %}class="on"{% endif %}>Teacher sign in</a>
+      <a class="pill" href="{{ url_for('signup') }}">Teacher sign up</a>
     {% endif %}
   </nav>
 </div></div>

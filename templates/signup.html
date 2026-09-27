@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Teacher sign up &middot; {{ course }}{% endblock %}
+{% block body %}
+<main><div class="wrap narrow">
+  <p class="eyebrow">Teacher area</p>
+  <h2 class="sec">Sign up</h2>
+  <p class="intro">Teachers sign up with a mobile number. We text you a six digit
+  code to confirm the number is yours, and your account is created once you enter it.
+  Students do not need an account to read the course.</p>
+
+  <form class="card" method="post" style="max-width:480px">
+    <div class="field">
+      <label for="dn">Your name</label>
+      <p class="hint">Shown beside any chapter or question you write.</p>
+      <input id="dn" type="text" name="display_name" autocomplete="name" required autofocus>
+    </div>
+    <div class="field">
+      <label for="ph">Mobile number</label>
+      <p class="hint">Include the country code, for example <code>+16045550132</code>.</p>
+      <input id="ph" type="tel" name="phone" autocomplete="tel" inputmode="tel" required>
+    </div>
+    <div class="field">
+      <label for="pw">Choose a password</label>
+      <p class="hint">At least 8 characters. You will use it with your mobile number to sign in.</p>
+      <input id="pw" type="password" name="password" autocomplete="new-password" required>
+    </div>
+    <button class="btn blue" type="submit">Send me a code</button>
+  </form>
+
+  <p style="margin-top:20px">Already have an account?
+    <a href="{{ url_for('login') }}">Sign in</a>.</p>
+</div></main>
+{% endblock %}

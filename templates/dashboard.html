@@ -72,12 +72,14 @@
   create their account here, so nobody can join from the open web.</p>
 
   <table class="data">
-    <tr><th style="width:150px">Username</th><th>Name</th><th style="width:100px">Role</th>
-        <th style="width:160px">Added</th><th style="width:110px"></th></tr>
+    <tr><th style="width:130px">Username</th><th>Name</th><th style="width:140px">Mobile</th>
+        <th style="width:90px">Role</th><th style="width:150px">Added</th>
+        <th style="width:100px"></th></tr>
     {% for t in teachers %}
     <tr>
       <td>{{ t.username }}</td>
       <td>{{ t.display_name }}{% if t.id == user.id %} <span class="badge draft">you</span>{% endif %}</td>
+      <td class="c" style="text-align:left">{{ t.phone or '—' }}</td>
       <td>{% if t.role == 'admin' %}<span class="badge curriculum">admin</span>
           {% else %}<span class="badge manual">teacher</span>{% endif %}</td>
       <td class="c" style="text-align:left">{{ t.created }}</td>
