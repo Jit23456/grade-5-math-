@@ -1,7 +1,13 @@
 {% extends "base.html" %}
-{% import "_charts.html" as charts %}
 {% block title %}Ch {{ c.number }}. {{ c.title }} &middot; {{ course }}{% endblock %}
 {% block body %}
+
+{% if preview %}
+<div class="previewbar"><div class="wrap">
+  <b>Teacher preview</b> Drafts are shown as students will see them once published.
+  <a href="{{ url_for('chapter', number=c.number) }}">Leave preview</a>
+</div></div>
+{% endif %}
 
 <div class="chhead"><div class="wrap">
   <div class="n">CHAPTER {{ '%02d'|format(c.number) }} &middot; G5-MATH-CH{{ '%02d'|format(c.number) }}</div>
@@ -9,8 +15,8 @@
   {% if c.lede %}<p class="lede">{{ c.lede }}</p>{% endif %}
   <ul class="tags">
     <li>{{ c.strand }}</li>
-    <li>{{ c.lesson_count }} lessons</li>
-    <li>{{ questions|length }} marks</li>
+    <li>{{ topics|length }} lesson{{ '' if topics|length == 1 else 's' }}</li>
+    <li>{{ nq }} question assessment</li>
     {% if not c.published %}<li style="border-color:var(--amber);color:var(--amber)">UNPUBLISHED DRAFT</li>{% endif %}
   </ul>
 </div></div>
@@ -23,9 +29,25 @@
       {{ SOURCES[c.source][1] if c.source in SOURCES else '' }}{% if c.author %} &middot; {{ c.author }}{% endif %} &middot; updated {{ c.updated }}
     </span>
     {% if user %}
-    <a class="btn light sm" style="float:right" href="{{ url_for('edit_chapter', number=c.number) }}">Edit chapter</a>
+    <span style="float:right">
+      {% if not preview %}<a class="btn light sm" href="{{ url_for('chapter', number=c.number, preview=1) }}">Preview drafts</a>{% endif %}
+      <a class="btn light sm" href="{{ url_for('edit_chapter', number=c.number) }}">Edit chapter</a>
+    </span>
     {% endif %}
   </p>
+
+  {% if topics or nq %}
+  <nav class="toc" aria-label="In this chapter">
+    <b>In this chapter</b>
+    <ol>
+      {% for t in topics %}
+      <li><a href="#topic-{{ t.id }}">{{ t.title }}</a>
+        {% if preview and t.status != 'published' %}<span class="badge draft">draft</span>{% endif %}</li>
+      {% endfor %}
+    </ol>
+    {% if nq %}<a class="toc-exam" href="{{ url_for('assessment', number=c.number, preview=1 if preview else None) }}">Chapter assessment &rarr;</a>{% endif %}
+  </nav>
+  {% endif %}
 
   {% if c.standard %}
   <div class="align">
@@ -54,76 +76,49 @@
     {% endif %}
 
     {{ c.body_html|safe }}
+  </div>
 
-    {% if c.summary %}
+  {% for t in topics %}
+  <section class="lesson" id="topic-{{ t.id }}">
+    <div class="lessonhead">
+      <span class="ln">LESSON {{ c.number }}.{{ loop.index }}</span>
+      <h3>{{ t.title }}</h3>
+      <span class="badge {{ t.source }}">{{ SOURCES[t.source][0] if t.source in SOURCES else t.source }}</span>
+      {% if preview and t.status != 'published' %}<span class="badge draft">not published</span>{% endif %}
+      {% if user %}<a class="btn light sm" href="{{ url_for('topic_studio', tid=t.id) }}">Edit</a>{% endif %}
+    </div>
+    {% if t.objective %}<p class="objective"><b>Learning objective</b> {{ t.objective }}</p>{% endif %}
+    <div class="prose">{{ t.show_html|safe }}</div>
+    {% if t.success_criteria %}
+    <div class="criteria"><b>Check yourself</b>
+      <ul>{% for s in t.success_criteria %}<li>{{ s }}</li>{% endfor %}</ul></div>
+    {% endif %}
+  </section>
+  {% else %}
+  <p class="intro" style="margin-top:20px">This chapter has no lessons yet.
+    {% if user %}<a href="{{ url_for('edit_chapter', number=c.number) }}#topics">Add the first topic</a>.{% endif %}</p>
+  {% endfor %}
+
+  {% if c.summary %}
+  <div class="prose">
     <h3>Chapter summary</h3>
     <ul>{% for s in c.summary %}<li>{{ s }}</li>{% endfor %}</ul>
-    {% endif %}
   </div>
-
-  {% if questions %}
-  <div class="chartcard" style="margin-bottom:26px">
-    <h4>Assessment composition</h4>
-    {{ charts.stackbar(comp_chart, questions|length, 'Question types in this chapter') }}
-  </div>
-
-  <div class="exam" id="exam">
-    <h2>Chapter {{ c.number }} assessment</h2>
-    <p class="qbar">{{ questions|length }} marks &middot; one per question
-      {%- for t, n in tally.items() %} &middot; {{ n }}
-        {{ {'mcq':'multiple choice','multi':'multi-select','fill':'fill in the blank'}[t] }}
-      {%- endfor %}</p>
-
-    {% for q in questions %}
-    <div class="q" data-id="q{{ q.id }}">
-      <div class="qhead">
-        <span class="qid">Q{{ loop.index }}</span>
-        <span class="qtype {{ q.source }}">
-          {{ {'mcq':'Multiple choice','multi':'Multi-select','fill':'Fill in the blank'}[q.type] }}
-          {%- if q.source == 'ai' %} &middot; AI draft{% elif q.source == 'manual' %} &middot; teacher{% endif %}
-        </span>
-      </div>
-      <p class="stem">{{ q.stem }}</p>
-      {% if q.visual %}<div class="qviz">{{ q.visual|safe }}</div>{% endif %}
-      {% if q.type == 'fill' %}
-        <div class="blank">
-          <input type="text" autocomplete="off" spellcheck="false"
-                 aria-label="Answer for question {{ loop.index }}" placeholder="Type your answer">
-          {% if q.unit %}<span class="unit">{{ q.unit }}</span>{% endif %}
-        </div>
-      {% else %}
-        <ul class="opts">
-          {% for o in q.options %}
-          <li><label class="opt" data-i="{{ loop.index0 }}">
-            <input type="{{ 'checkbox' if q.type == 'multi' else 'radio' }}"
-                   name="q{{ q.id }}" value="{{ loop.index0 }}">
-            <span class="key">{{ 'ABCDEF'[loop.index0] }}</span>
-            <span class="txt">{{ o }}</span>
-          </label></li>
-          {% endfor %}
-        </ul>
-      {% endif %}
-      <div class="fb"></div>
-    </div>
-    {% endfor %}
-
-    <div class="actions">
-      <button class="btn" id="check">Check answers</button>
-      <button class="btn ghost" id="reset">Start again</button>
-      <span id="result" role="status" aria-live="polite"></span>
-    </div>
-  </div>
-  {% else %}
-  <p class="intro" style="margin-top:34px">This chapter has no assessment questions yet.
-    {% if user %}<a href="{{ url_for('edit_question', number=c.number) }}">Add the first one</a>.{% endif %}</p>
   {% endif %}
 
-  {% if user %}
-  <p style="margin-top:26px">
-    <a class="btn light sm" href="{{ url_for('questions_list', number=c.number) }}">Manage questions</a>
-    <a class="btn light sm" href="{{ url_for('edit_question', number=c.number) }}">Add a question</a>
-    <a class="btn light sm" href="{{ url_for('assistant') }}">Draft with the AI assistant</a>
-  </p>
+  {% if nq %}
+  <div class="cta">
+    <div>
+      <p class="k">END OF CHAPTER {{ c.number }}</p>
+      <h3>Ready for the assessment?</h3>
+      <p>{{ nq }} question{{ '' if nq == 1 else 's' }} on everything in this chapter. You can check your
+        answers and try again as many times as you like.</p>
+    </div>
+    <a class="btn" href="{{ url_for('assessment', number=c.number, preview=1 if preview else None) }}">Start the assessment &rarr;</a>
+  </div>
+  {% elif user %}
+  <p class="intro" style="margin-top:34px">This chapter has no assessment questions yet.
+    <a href="{{ url_for('edit_question', number=c.number) }}">Add the first one</a>.</p>
   {% endif %}
 
   <div class="pager">
@@ -137,63 +132,4 @@
   <p style="margin-top:20px"><a href="{{ url_for('index') }}">All chapters</a></p>
 
 </div></main>
-{% endblock %}
-
-{% block scripts %}
-<script>
-const QDATA = {{ quiz_json|safe }};
-const KEYS = ['A','B','C','D','E','F'];
-const norm = s => (s||'').toLowerCase().replace(/[\s,\u00a0$]/g,'').trim();
-const level = p => p>=90?'Extending':p>=70?'Proficient':p>=50?'Developing':'Emerging';
-const exam = document.getElementById('exam');
-
-if (exam) {
-  document.getElementById('check').addEventListener('click', () => {
-    const boxes = exam.querySelectorAll('.q');
-    let score = 0;
-    boxes.forEach(box => {
-      const q = QDATA[box.dataset.id];
-      if (!q) return;
-      const fb = box.querySelector('.fb');
-      let ok = false, shown = '';
-      if (q.t === 'fill') {
-        const inp = box.querySelector('input[type=text]');
-        ok = q.accept.some(a => norm(a) === norm(inp.value));
-        inp.classList.remove('correct','wrong');
-        inp.classList.add(ok ? 'correct' : 'wrong');
-        shown = q.show;
-      } else {
-        box.querySelectorAll('.opt').forEach(o => o.classList.remove('correct','wrong'));
-        const want = q.ans.slice().sort((a,b) => a-b);
-        want.forEach(i => {
-          const el = box.querySelector('.opt[data-i="'+i+'"]');
-          if (el) el.classList.add('correct');
-        });
-        const got = [...box.querySelectorAll('input:checked')].map(i => +i.value).sort((a,b) => a-b);
-        got.filter(i => !want.includes(i)).forEach(i => {
-          const el = box.querySelector('.opt[data-i="'+i+'"]');
-          if (el) el.classList.add('wrong');
-        });
-        ok = got.length === want.length && got.every((v,k) => v === want[k]);
-        shown = want.map(i => KEYS[i]).join(' and ');
-      }
-      if (ok) score++;
-      fb.innerHTML = '<b>Answer: ' + shown + '.</b> ' + (q.why || '');
-      fb.classList.add('show');
-    });
-    const pct = Math.round(score / boxes.length * 100);
-    document.getElementById('result').innerHTML =
-      'Score ' + score + ' of ' + boxes.length + ' &mdash; <span class="lvl">' + level(pct) + '</span>';
-  });
-
-  document.getElementById('reset').addEventListener('click', () => {
-    exam.querySelectorAll('input:checked').forEach(i => i.checked = false);
-    exam.querySelectorAll('input[type=text]').forEach(i => { i.value=''; i.classList.remove('correct','wrong'); });
-    exam.querySelectorAll('.opt').forEach(o => o.classList.remove('correct','wrong'));
-    exam.querySelectorAll('.fb').forEach(f => { f.classList.remove('show'); f.innerHTML=''; });
-    document.getElementById('result').textContent = '';
-    exam.scrollIntoView();
-  });
-}
-</script>
 {% endblock %}

@@ -7,6 +7,7 @@
   --mono:'IBM Plex Mono',ui-monospace,SFMono-Regular,monospace;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html{scroll-behavior:smooth}
 body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--serif);
   font-size:17px;line-height:1.65;-webkit-font-smoothing:antialiased}
@@ -236,6 +237,139 @@ table.data tr:hover td{background:#f0f5f6}
   padding:13px 16px;font-family:var(--sans);font-size:14px;color:#6b4c07;margin-bottom:20px}
 .warnbox b{display:block;margin-bottom:3px}
 
+.muted{color:var(--ink-2);font-family:var(--sans);font-size:13px}
+.req{font-family:var(--mono);font-size:10px;font-weight:400;color:var(--ink-2);margin-left:6px}
+.linkbtn{background:none;border:0;padding:0;color:var(--blue);text-decoration:underline;
+  cursor:pointer;font:inherit}
+
+/* ---------------- chapter page: lessons and the way to the assessment ---------------- */
+.previewbar{background:var(--amber-wash);border-bottom:1px solid #eddaa9;font-family:var(--sans);
+  font-size:14px;color:#6b4c07;padding:10px 0}
+.previewbar b{margin-right:8px}
+.previewbar a{margin-left:10px}
+.toc{background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:16px 20px;
+  margin:0 0 26px;font-family:var(--sans)}
+.toc b{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2)}
+.toc ol{margin:8px 0 6px;padding-left:22px;font-size:15px}
+.toc li{margin:3px 0}
+.toc-exam{font-weight:600;font-size:15px}
+.lesson{margin:44px 0 0;padding-top:26px;border-top:1px solid var(--rule)}
+.lessonhead{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px 12px;margin-bottom:12px}
+.lessonhead .ln{font-family:var(--mono);font-size:11px;color:var(--blue);flex-basis:100%}
+.lessonhead h3{font-size:24px;font-weight:800}
+.lessonhead .btn{margin-left:auto}
+.objective{font-family:var(--sans);font-size:15px;background:var(--blue-wash);border-radius:6px;
+  padding:9px 14px;margin:0 0 18px;max-width:70ch}
+.objective b{color:var(--blue);margin-right:6px}
+.criteria{background:var(--green-wash);border:1px solid #b6ddcd;border-radius:6px;
+  padding:12px 16px;margin:6px 0 0;font-family:var(--sans);font-size:14.5px;max-width:70ch}
+.criteria b{color:var(--green)}
+.criteria ul{margin:6px 0 0;padding-left:20px}
+.cta{display:flex;flex-wrap:wrap;gap:18px;align-items:center;justify-content:space-between;
+  background:var(--ink);color:#e9f1f2;border-radius:9px;padding:26px 28px;margin:44px 0 0}
+.cta .k{font-family:var(--mono);font-size:11px;color:var(--amber);margin:0 0 5px}
+.cta h3{font-size:22px;font-weight:800;color:#fff;margin:0 0 5px}
+.cta p{margin:0;color:#b7cdd4;max-width:52ch}
+.cta .btn.light{color:#e9f1f2;border-color:#3d6572}
+.cta .btn.light:hover{background:#1c4250}
+
+/* ---------------- step indicator and workspace tabs ---------------- */
+.steps{display:flex;flex-wrap:wrap;gap:6px;list-style:none;padding:0;margin:0 0 24px;
+  font-family:var(--sans);font-size:13px;counter-reset:s}
+.steps li{padding:6px 12px;border:1px solid var(--rule);border-radius:16px;color:var(--ink-2);background:var(--card)}
+.steps li.done{border-color:#b6ddcd;background:var(--green-wash);color:var(--green)}
+.steps li.on{border-color:var(--blue);background:var(--blue-wash);color:var(--blue);font-weight:600}
+.steps.tabs li{padding:0;border:0;background:none}
+.steps.tabs button{font:inherit;font-size:14px;padding:9px 16px;border:1px solid var(--rule);
+  border-radius:6px;background:var(--card);color:var(--ink);cursor:pointer}
+.steps.tabs button:hover{border-color:var(--blue)}
+.steps.tabs button.on{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:600}
+.studiohead{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:14px}
+.studiohead h2.sec{margin:0}
+.savestate{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--green)}
+.savestate.warn{color:#8a5b00}
+.savestate.bad{color:var(--red)}
+.panel .field input[type=text],.panel .field input[type=number],.panel .field select,
+.panel .field textarea,.gencard input[type=text],.gencard input[type=number],.gencard select{
+  width:100%;padding:10px 12px;border:1px solid var(--rule);border-radius:5px;
+  font-family:var(--serif);font-size:16px;background:#fff;color:var(--ink)}
+.panel .field textarea{font-family:var(--mono);font-size:13.5px;line-height:1.6;resize:vertical}
+.field .filled{background:#fffbea;border-color:#e8cf8a}
+.aihelp{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;font-family:var(--sans);
+  font-size:13px;color:var(--ink-2);background:#f7f9fa;border:1px dashed var(--rule);
+  border-radius:6px;padding:11px 14px;margin:0 0 20px}
+.aihelp .refine-err{flex-basis:100%;margin:0}
+
+/* ---------------- lesson editor ---------------- */
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:5px;overflow:hidden}
+.seg button{font-family:var(--sans);font-size:13px;padding:7px 14px;border:0;background:#fff;
+  color:var(--ink);cursor:pointer}
+.seg button+button{border-left:1px solid var(--rule)}
+.seg button.on{background:var(--ink);color:#fff}
+textarea.editor{width:100%;min-height:420px;padding:14px 16px;border:1px solid var(--rule);
+  border-radius:6px;font-family:var(--mono);font-size:13.5px;line-height:1.65;resize:vertical;
+  background:#fff;color:var(--ink)}
+.previewpane{background:var(--paper);border:1px solid var(--rule);border-radius:6px;
+  padding:6px 22px 10px;min-height:200px}
+
+/* ---------------- refine panel ---------------- */
+.aibtn{margin-top:7px;font-family:var(--sans);font-size:12.5px;font-weight:600;color:var(--blue);
+  background:var(--blue-wash);border:1px solid #c5daf3;border-radius:14px;padding:4px 12px;cursor:pointer}
+.aibtn:hover{border-color:var(--blue)}
+.refine{margin-top:12px;background:#f7f9fa;border:1px solid var(--rule);border-radius:7px;padding:12px 14px}
+.refine-title{display:block;font-family:var(--sans);font-size:13.5px;margin-bottom:8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
+.chip{font-family:var(--sans);font-size:12.5px;padding:5px 11px;border:1px solid var(--rule);
+  border-radius:14px;background:#fff;color:var(--ink);cursor:pointer}
+.chip:hover{border-color:var(--blue);color:var(--blue)}
+.refine-ask{display:flex;gap:8px}
+.refine-ask input{flex:1;min-width:0;padding:8px 11px;border:1px solid var(--rule);border-radius:5px;
+  font-family:var(--sans);font-size:14px}
+.refine-out{margin-top:12px;border:1px solid var(--rule);border-left:3px solid var(--amber);
+  border-radius:6px;background:#fffdf7;padding:12px 14px}
+.refine-out pre{background:#fff;border:1px solid var(--rule);padding:11px 13px;margin:0;
+  max-height:420px;overflow:auto;font-family:var(--mono);font-size:12.5px;white-space:pre-wrap}
+.refine-actions{margin-top:10px}
+.refine-err{font-family:var(--sans);font-size:13.5px;color:var(--green);margin:9px 0 0}
+.refine-err.bad{color:var(--red)}
+.dh{display:flex;justify-content:space-between;gap:10px;align-items:baseline;
+  margin-bottom:8px;font-family:var(--sans);font-size:12.5px;color:var(--ink-2)}
+
+/* ---------------- question cards ---------------- */
+.gencard{background:#f7f9fa;border:1px solid var(--rule);border-radius:7px;padding:16px 18px;margin-bottom:18px}
+.row3{display:grid;grid-template-columns:110px 150px 1fr;gap:16px}
+.checks{display:flex;flex-wrap:wrap;gap:6px 16px;padding-top:8px}
+.qtools{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:6px 0 10px;
+  font-family:var(--mono);font-size:12px;color:var(--ink-2)}
+.qcard{border:1px solid var(--rule);border-left:3px solid var(--green);border-radius:6px;
+  padding:14px 16px;margin-bottom:12px;background:#fff}
+.qcard.isdraft{border-left-color:var(--amber);background:#fffdf7}
+.qcard .dh{justify-content:flex-start}
+.qcard .dh span:first-of-type{margin-right:auto}
+.qc-stem{margin:0 0 9px;font-size:16px}
+.qc-why{font-size:14.5px;color:var(--ink-2);margin:9px 0 0;font-style:italic}
+.optline{font-family:var(--sans);font-size:14px;margin:3px 0}
+.optline.ok{color:var(--green);font-weight:600}
+.qc-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.qc-extra:not(:empty){margin-top:12px}
+.qc-form{background:#f7f9fa;border:1px solid var(--rule);border-radius:6px;padding:14px 16px}
+.qc-form .field{margin-bottom:12px}
+.qc-form input[type=text],.qc-form select,.qc-form textarea{width:100%;padding:8px 10px;
+  border:1px solid var(--rule);border-radius:5px;font-family:var(--sans);font-size:14px;background:#fff}
+
+/* ---------------- preview and publish ---------------- */
+.checklist{list-style:none;padding:0;margin:0 0 18px;font-family:var(--sans);font-size:14.5px}
+.checklist li{padding:4px 0 4px 26px;position:relative}
+.checklist li::before{position:absolute;left:0;font-weight:700}
+.checklist li.ok::before{content:"\2713";color:var(--green)}
+.checklist li.todo{color:#8a5b00}
+.checklist li.todo::before{content:"!";color:var(--amber);left:5px}
+.finalpreview{background:var(--paper);border:1px solid var(--rule);border-radius:8px;
+  padding:20px 24px;margin:16px 0 20px}
+.pubbox{display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;background:var(--blue-wash);
+  border:1px solid #c5daf3;border-radius:7px;padding:14px 16px;margin-bottom:14px}
+
 footer{background:#0c242c;color:#7ba0ac;font-family:var(--mono);font-size:11.5px;
   padding:26px 0;margin-top:70px}
 footer .wrap{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between}
@@ -248,7 +382,7 @@ footer a{color:#9dc0ca}
 
 @media (max-width:860px){
   .asst{grid-template-columns:1fr}
-  .row{grid-template-columns:1fr}
+  .row,.row3{grid-template-columns:1fr}
   .chartrow{grid-template-columns:1fr}
   body{font-size:16px}
   .top .wrap{height:auto;padding-top:9px;padding-bottom:9px;flex-wrap:wrap}

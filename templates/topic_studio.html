@@ -1,0 +1,507 @@
+{% extends "base.html" %}
+{% import "_topic_fields.html" as tf %}
+{% block title %}{{ t.title }} &middot; Ch {{ ch.number }} &middot; {{ course }}{% endblock %}
+{% block body %}
+<main><div class="wrap">
+  <p class="eyebrow"><a href="{{ url_for('edit_chapter', number=ch.number) }}#topics">Chapter {{ ch.number }} &middot; {{ ch.title }}</a></p>
+  <div class="studiohead">
+    <h2 class="sec" id="htitle">{{ t.title }}</h2>
+    <span id="pubstate">
+      {% if t.status == 'published' %}<span class="badge manual">published</span>
+        {% if t.draft_md != t.body_md %}<span class="badge draft">unpublished edits</span>{% endif %}
+      {% else %}<span class="badge draft">draft, students cannot see it</span>{% endif %}
+      <span class="badge {{ t.source }}">{{ SOURCES[t.source][0] if t.source in SOURCES else t.source }}</span>
+    </span>
+    <span class="savestate" id="savestate">All changes saved</span>
+  </div>
+
+  <ol class="steps tabs" role="tablist">
+    <li><button type="button" data-step="brief">1. Topic brief</button></li>
+    <li><button type="button" data-step="content">2. Lesson</button></li>
+    <li><button type="button" data-step="questions">3. Assessment <span id="qbadge"></span></button></li>
+    <li><button type="button" data-step="publish">4. Preview &amp; publish</button></li>
+  </ol>
+
+  {% if not ai_ready %}
+  <div class="warnbox"><b>The AI assistant is switched off</b>
+  Everything here still works by hand. Set <code>GROQ_API_KEY</code> on the server to switch
+  on writing and refining with AI.</div>
+  {% endif %}
+
+  <!-- 1. brief -->
+  <section class="panel" data-panel="brief" hidden>
+    <h3>Topic brief</h3>
+    <p class="muted" style="margin-top:-6px">The assistant writes the lesson and the questions from this
+      brief. Change it at any time; the next draft follows the new brief.</p>
+    <form id="brief" onsubmit="return false">
+      {{ tf.fields(t, LEVELS) }}
+    </form>
+    {% if ai_ready %}
+    <div class="aihelp">
+      <button type="button" class="btn light sm" id="suggest">&#10022; Fill empty fields with AI</button>
+      <span>Uses the chapter and the title. Check what it suggests.</span>
+      <p class="refine-err bad" id="suggesterr" hidden></p>
+    </div>
+    {% endif %}
+    <button type="button" class="btn blue" data-goto="content">Save and go to the lesson &rarr;</button>
+  </section>
+
+  <!-- 2. lesson -->
+  <section class="panel" data-panel="content" hidden>
+    <h3>Lesson</h3>
+    <div class="toolbar">
+      {% if ai_ready %}<button type="button" class="btn blue sm" id="gen">&#10022; Write the lesson from the brief</button>{% endif %}
+      <div class="seg" role="group" aria-label="View">
+        <button type="button" data-view="edit" class="on">Edit</button><button type="button" data-view="preview">Preview</button>
+      </div>
+      <button type="button" class="btn light sm" id="undo" disabled>Undo</button>
+      <button type="button" class="btn light sm" id="save">Save draft</button>
+    </div>
+    <p class="refine-err bad" id="generr" hidden></p>
+    <p class="hint" id="mdhint">Markdown. Use <code>#### Heading</code>, tables, fenced code blocks for worked
+      examples, and <code>&gt; **Watch out.**</code> for the common error. The lesson title is added for you.</p>
+    <textarea id="draft" class="editor" rows="24" spellcheck="true"
+              placeholder="Write the lesson here, or have the assistant write it from the brief.">{{ t.draft_md }}</textarea>
+    <div id="preview" class="prose previewpane" hidden></div>
+    <p style="margin-top:18px"><button type="button" class="btn blue" data-goto="questions">Save and go to the assessment &rarr;</button></p>
+  </section>
+
+  <!-- 3. questions -->
+  <section class="panel" data-panel="questions" hidden>
+    <h3>Assessment questions for this topic</h3>
+    <p class="muted" style="margin-top:-6px">New questions start as drafts. Students only see questions
+      that are live. Edit any of them by hand or ask the assistant to refine one.</p>
+
+    <div class="gencard">
+      <div class="row3">
+        <div class="field"><label for="qn">How many</label>
+          <input id="qn" type="number" min="1" max="12" value="5"></div>
+        <div class="field"><label for="qdiff">Difficulty</label>
+          <select id="qdiff"><option value="mixed">A mix</option><option value="easy">Easy</option>
+            <option value="medium">Medium</option><option value="hard">Hard</option></select></div>
+        <div class="field"><label>Types</label>
+          <div class="checks">
+            <label class="check"><input type="checkbox" name="qtype" value="mcq" checked> Multiple choice</label>
+            <label class="check"><input type="checkbox" name="qtype" value="multi" checked> Multi-select</label>
+            <label class="check"><input type="checkbox" name="qtype" value="fill" checked> Fill in the blank</label>
+          </div></div>
+      </div>
+      <div class="field"><label for="qask">Anything else? (optional)</label>
+        <input id="qask" type="text" placeholder="e.g. two word problems about money, no negative numbers"></div>
+      {% if ai_ready %}<button type="button" class="btn blue" id="genq">&#10022; Write questions with AI</button>{% endif %}
+      <a class="btn light" id="addq" href="{{ url_for('edit_question', number=ch.number, topic=t.id, next=url_for('topic_studio', tid=t.id, step='questions')) }}">+ Write one by hand</a>
+      <p class="refine-err bad" id="genqerr" hidden></p>
+      <p class="refine-err" id="genqok" hidden></p>
+    </div>
+
+    <div class="qtools">
+      <span id="qcount"></span>
+      <button type="button" class="btn light sm" id="golive" hidden>Make all drafts live</button>
+    </div>
+    <div id="qlist"></div>
+    <p style="margin-top:18px"><button type="button" class="btn blue" data-goto="publish">Go to preview &amp; publish &rarr;</button></p>
+  </section>
+
+  <!-- 4. publish -->
+  <section class="panel" data-panel="publish" hidden>
+    <h3>Preview &amp; publish</h3>
+    <ul class="checklist" id="checks"></ul>
+
+    <p>
+      <a class="btn light sm" id="pvchapter" target="_blank" href="{{ url_for('chapter', number=ch.number, preview=1) }}#topic-{{ t.id }}">Open the student view of the lesson &#8599;</a>
+      <a class="btn light sm" id="pvexam" target="_blank" href="{{ url_for('assessment', number=ch.number, preview=1) }}">Open the student view of the assessment &#8599;</a>
+    </p>
+
+    <div class="finalpreview">
+      <div class="lessonhead"><span class="ln">PREVIEW</span><h3 id="fptitle">{{ t.title }}</h3></div>
+      <p class="objective" id="fpobj" hidden></p>
+      <div class="prose" id="fpbody"></div>
+      <div class="criteria" id="fpcrit" hidden><b>Check yourself</b><ul></ul></div>
+    </div>
+
+    <form method="post" action="{{ url_for('topic_publish', tid=t.id) }}" id="pubform" class="pubbox">
+      <label class="check"><input type="checkbox" name="with_questions" value="1" checked>
+        <span id="withq">Also make this topic's draft questions live</span></label>
+      <button class="btn blue" type="submit">{{ 'Publish the changes' if t.status == 'published' else 'Publish this topic' }}</button>
+    </form>
+    {% if t.status == 'published' %}
+    <form method="post" action="{{ url_for('topic_unpublish', tid=t.id) }}" style="display:inline">
+      <button class="btn light sm" type="submit">Hide from students</button></form>
+    {% endif %}
+    <form method="post" action="{{ url_for('topic_delete', tid=t.id) }}" style="display:inline"
+          onsubmit="return confirm('Delete this topic? Its questions stay in the chapter.')">
+      <button class="btn danger sm" type="submit">Delete topic</button></form>
+  </section>
+</div></main>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='ai.js') }}"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = AI.esc;
+const TID = {{ t.id }}, CH = {{ ch.number }};
+const AUTOGEN = {{ 'true' if autogen and ai_ready else 'false' }};
+const AI_READY = {{ 'true' if ai_ready else 'false' }};
+const API = {
+  save: '{{ url_for("topic_save", tid=t.id) }}',
+  render: '{{ url_for("api_render") }}',
+  brief: '{{ url_for("ai_brief") }}',
+  lesson: '{{ url_for("ai_lesson", tid=t.id) }}',
+  questions: '{{ url_for("ai_questions", tid=t.id) }}',
+  refine: '{{ url_for("ai_refine") }}',
+  refineQ: '{{ url_for("ai_refine_question") }}',
+  qsave: id => '{{ url_for("api_question_save", qid=0) }}'.replace('/0/', '/' + id + '/'),
+  qstatus: id => '{{ url_for("api_question_status", qid=0) }}'.replace('/0/', '/' + id + '/'),
+  qdelete: id => '{{ url_for("api_question_delete", qid=0) }}'.replace('/0/', '/' + id + '/'),
+  qedit: id => '{{ url_for("edit_question", number=ch.number, qid=0) }}'.replace(/\/0$/, '/' + id) +
+               '?next=' + encodeURIComponent('{{ url_for("topic_studio", tid=t.id, step="questions") }}'),
+};
+const KEYS = ['A','B','C','D','E','F'];
+const TYPE = {mcq: 'Multiple choice', multi: 'Multi-select', fill: 'Fill in the blank'};
+const SRC = {curriculum: 'Curriculum', manual: 'Teacher written', ai: 'AI draft'};
+let QUESTIONS = {{ questions|tojson }};
+
+const briefForm = $('brief'), draft = $('draft');
+const brief = () => Object.fromEntries(new FormData(briefForm));
+
+/* ---------------------------------------------------------------- saving */
+let dirty = false, aiUsed = false;
+function markDirty() { dirty = true; $('savestate').textContent = 'Unsaved changes'; $('savestate').className = 'savestate warn'; }
+briefForm.addEventListener('input', markDirty);
+draft.addEventListener('input', markDirty);
+async function save() {
+  if (!dirty) return true;
+  if (!brief().title.trim()) { show('brief'); $('f_title').focus(); alert('The topic needs a title.'); return false; }
+  $('savestate').textContent = 'Saving…';
+  const d = await AI.post(API.save, Object.assign(brief(), {draft_md: draft.value, ai_used: aiUsed}));
+  if (!d.ok) { $('savestate').textContent = 'Not saved: ' + d.error; $('savestate').className = 'savestate bad'; return false; }
+  dirty = false; aiUsed = false;
+  $('savestate').textContent = 'Draft saved ' + new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+  $('savestate').className = 'savestate';
+  $('htitle').textContent = brief().title;
+  return true;
+}
+$('save').addEventListener('click', save);
+window.addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); save(); }
+});
+
+/* ------------------------------------------------------------------ steps */
+const STEPS = ['brief', 'content', 'questions', 'publish'];
+async function show(step) {
+  if (!STEPS.includes(step)) step = 'brief';
+  document.querySelectorAll('[data-panel]').forEach(p => p.hidden = p.dataset.panel !== step);
+  document.querySelectorAll('.tabs [data-step]').forEach(b => {
+    b.classList.toggle('on', b.dataset.step === step);
+    b.setAttribute('aria-selected', b.dataset.step === step);
+  });
+  const u = new URL(location.href); u.searchParams.set('step', step); u.searchParams.delete('autogen');
+  history.replaceState(null, '', u);
+  if (step === 'publish') renderFinal();
+}
+document.querySelectorAll('.tabs [data-step]').forEach(b =>
+  b.addEventListener('click', async () => { await save(); show(b.dataset.step); }));
+document.querySelectorAll('[data-goto]').forEach(b =>
+  b.addEventListener('click', async () => { if (await save()) { show(b.dataset.goto); scrollTo(0, 0); } }));
+
+/* ------------------------------------------------------------ brief help */
+const sug = $('suggest');
+if (sug) sug.addEventListener('click', async () => {
+  const err = $('suggesterr'); err.hidden = true;
+  AI.busy(sug, true, 'Thinking');
+  const d = await AI.post(API.brief, Object.assign(brief(), {chapter: CH}));
+  AI.busy(sug, false);
+  if (!d.ok) { err.textContent = d.error; err.hidden = false; return; }
+  let n = 0;
+  for (const [k, v] of Object.entries(d.brief)) {
+    const f = briefForm.elements[k];
+    if (f && !f.value.trim() && v) { f.value = v; f.classList.add('filled'); n++; }
+  }
+  if (n) markDirty();
+  err.textContent = n ? 'Filled ' + n + ' field' + (n === 1 ? '' : 's') + '. Check them, then save.' : 'Every field already has something in it.';
+  err.className = 'refine-err'; err.hidden = false;
+});
+
+/* ----------------------------------------------------------------- lesson */
+const undoStack = [];
+function pushUndo(v) { undoStack.push(v); $('undo').disabled = false; }
+$('undo').addEventListener('click', () => {
+  if (!undoStack.length) return;
+  draft.value = undoStack.pop();
+  $('undo').disabled = !undoStack.length;
+  markDirty(); if (view === 'preview') renderPreview();
+});
+
+let view = 'edit';
+async function renderPreview() {
+  const d = await AI.post(API.render, {md: draft.value});
+  $('preview').innerHTML = d.ok ? (d.html || '<p class="muted">Nothing written yet.</p>') : esc(d.error);
+}
+function setView(v) {
+  view = v;
+  document.querySelectorAll('.seg [data-view]').forEach(b => b.classList.toggle('on', b.dataset.view === v));
+  draft.hidden = v !== 'edit'; $('mdhint').hidden = v !== 'edit';
+  $('preview').hidden = v !== 'preview';
+  if (v === 'preview') renderPreview();
+}
+document.querySelectorAll('.seg [data-view]').forEach(b => b.addEventListener('click', () => setView(b.dataset.view)));
+
+async function writeLesson(ask) {
+  const btn = $('gen'); if (!btn) return;
+  if (ask && draft.value.trim() &&
+      !confirm('Replace the current lesson with a new one written from the brief? You can undo.')) return;
+  $('generr').hidden = true;
+  AI.busy(btn, true, 'Writing the lesson, about 20 seconds');
+  const d = await AI.post(API.lesson, brief());
+  AI.busy(btn, false);
+  if (!d.ok) { $('generr').textContent = d.error; $('generr').hidden = false; return; }
+  pushUndo(draft.value);
+  draft.value = d.text;
+  aiUsed = true; markDirty();
+  await save();
+  setView('preview');
+}
+if ($('gen')) $('gen').addEventListener('click', () => writeLesson(true));
+
+{% if ai_ready %}
+AI.refine(draft, {
+  url: API.refine, title: 'Refine the lesson with AI',
+  what: 'The lesson text students read (Markdown)',
+  extra: () => ({chapter: CH, topic: brief()}),
+  onApply: (text, old) => { pushUndo(old); aiUsed = true; if (view === 'preview') renderPreview(); },
+}).hidden = false;
+{% endif %}
+
+/* -------------------------------------------------------------- questions */
+function qBody(q) {
+  let body;
+  if (q.type === 'fill') {
+    body = '<div class="optline ok">Accepted: ' + q.accept.map(esc).join(' &nbsp;|&nbsp; ') +
+           (q.unit ? ' <span class="muted">(' + esc(q.unit) + ')</span>' : '') + '</div>';
+  } else {
+    body = q.options.map((o, i) => '<div class="optline' + (q.answer.includes(i) ? ' ok' : '') + '">' +
+      KEYS[i] + '. ' + esc(o) + (q.answer.includes(i) ? ' &check;' : '') + '</div>').join('');
+  }
+  return '<p class="qc-stem">' + esc(q.stem) + '</p>' + body +
+         (q.explanation ? '<p class="qc-why">' + esc(q.explanation) + '</p>' : '');
+}
+
+function qCard(q, n) {
+  const live = q.status === 'live';
+  return '<div class="qcard' + (live ? '' : ' isdraft') + '" data-id="' + q.id + '">' +
+    '<div class="dh"><b>Q' + n + '</b><span>' + TYPE[q.type] + ' &middot; ' + esc(q.difficulty) +
+    (q.skill_tag ? ' &middot; ' + esc(q.skill_tag) : '') + '</span>' +
+    '<span class="badge ' + (live ? 'manual' : 'draft') + '">' + (live ? 'live' : 'draft') + '</span>' +
+    '<span class="badge ' + q.source + '">' + (SRC[q.source] || q.source) + '</span></div>' +
+    '<div class="qc-view">' + qBody(q) + '</div>' +
+    '<div class="qc-actions">' +
+      '<button type="button" class="btn light sm" data-act="edit">Edit</button>' +
+      (AI_READY ? '<button type="button" class="btn light sm" data-act="refine">&#10022; Refine with AI</button>' : '') +
+      '<button type="button" class="btn light sm" data-act="status">' + (live ? 'Back to draft' : 'Make live') + '</button>' +
+      '<a class="btn light sm" href="' + API.qedit(q.id) + '">Full editor</a>' +
+      '<button type="button" class="btn danger sm" data-act="delete">Delete</button>' +
+    '</div><div class="qc-extra"></div></div>';
+}
+
+function renderQuestions() {
+  const drafts = QUESTIONS.filter(q => q.status !== 'live').length;
+  $('qlist').innerHTML = QUESTIONS.length ? QUESTIONS.map((q, i) => qCard(q, i + 1)).join('')
+    : '<p class="muted">No questions for this topic yet.</p>';
+  $('qcount').textContent = QUESTIONS.length + ' question' + (QUESTIONS.length === 1 ? '' : 's') +
+    ' · ' + (QUESTIONS.length - drafts) + ' live · ' + drafts + ' draft';
+  $('qbadge').textContent = QUESTIONS.length ? '(' + QUESTIONS.length + ')' : '';
+  $('golive').hidden = !drafts;
+}
+
+function letters(s) {
+  return [...new Set((s || '').toUpperCase().replace(/[^A-F]/g, '').split('').map(c => KEYS.indexOf(c)))]
+    .sort((a, b) => a - b);
+}
+
+function editForm(q) {
+  const sel = (v, opts) => opts.map(([k, l]) => '<option value="' + k + '"' + (k === v ? ' selected' : '') + '>' + l + '</option>').join('');
+  return '<form class="qc-form" onsubmit="return false">' +
+    '<div class="row"><div class="field"><label>Type</label><select name="type">' +
+      sel(q.type, [['mcq','Multiple choice'],['multi','Multi-select'],['fill','Fill in the blank']]) + '</select></div>' +
+    '<div class="field"><label>Difficulty</label><select name="difficulty">' +
+      sel(q.difficulty, [['easy','easy'],['medium','medium'],['hard','hard']]) + '</select></div></div>' +
+    '<div class="field"><label>Question</label><textarea name="stem" rows="3">' + esc(q.stem) + '</textarea></div>' +
+    '<div class="field ch"><label>Options, one per line</label><textarea name="options" rows="5">' + esc(q.options.join('\n')) + '</textarea></div>' +
+    '<div class="field ch"><label>Correct option letters</label><input type="text" name="correct" value="' + q.answer.map(i => KEYS[i]).join(', ') + '" placeholder="e.g. B, or A, C for multi-select"></div>' +
+    '<div class="field fl"><label>Accepted answers, one per line</label><textarea name="accept" rows="3">' + esc(q.accept.join('\n')) + '</textarea></div>' +
+    '<div class="row fl"><div class="field"><label>Answer to show</label><input type="text" name="display_answer" value="' + esc(q.type === 'fill' ? q.display_answer : '') + '"></div>' +
+    '<div class="field"><label>Unit label</label><input type="text" name="unit" value="' + esc(q.unit) + '"></div></div>' +
+    '<div class="field"><label>Explanation</label><textarea name="explanation" rows="3">' + esc(q.explanation) + '</textarea></div>' +
+    '<div class="field"><label>Skill tag</label><input type="text" name="skill_tag" value="' + esc(q.skill_tag) + '"></div>' +
+    '<button type="button" class="btn blue sm" data-act="savefix">Save question</button> ' +
+    '<button type="button" class="btn light sm" data-act="close">Cancel</button>' +
+    '<p class="refine-err bad" hidden></p></form>';
+}
+
+function syncFormType(form) {
+  const fill = form.elements.type.value === 'fill';
+  form.querySelectorAll('.ch').forEach(el => el.hidden = fill);
+  form.querySelectorAll('.fl').forEach(el => el.hidden = !fill);
+}
+
+function refineBox() {
+  const chips = ['Make it easier', 'Make it harder', 'Clearer wording', 'Better wrong answers',
+                 'Fuller explanation', 'Check the answer key', 'Turn it into a word problem'];
+  return '<div class="refine"><b class="refine-title">Refine this question with AI</b>' +
+    '<div class="chips">' + chips.map(c => '<button type="button" class="chip">' + c + '</button>').join('') + '</div>' +
+    '<div class="refine-ask"><input type="text" placeholder="Or say what to change"><button type="button" class="btn blue sm" data-act="runrefine">Refine</button></div>' +
+    '<div class="refine-out" hidden><div class="dh"><b>Suggested version</b><span>use it or discard it</span></div><div class="qc-prop"></div>' +
+    '<div class="refine-actions"><button type="button" class="btn blue sm" data-act="useprop">Use this</button> ' +
+    '<button type="button" class="btn light sm" data-act="close">Discard</button></div></div>' +
+    '<p class="refine-err bad" hidden></p></div>';
+}
+
+const proposals = {};
+async function saveQuestion(id, question, ai) {
+  const d = await AI.post(API.qsave(id), {question, ai_used: !!ai});
+  if (!d.ok) return d.error;
+  const i = QUESTIONS.findIndex(q => q.id === id);
+  QUESTIONS[i] = d.question;
+  renderQuestions();
+  return null;
+}
+
+async function runRefine(card, id, instruction) {
+  const box = card.querySelector('.refine');
+  const err = box.querySelector('.refine-err'), btn = box.querySelector('[data-act=runrefine]');
+  if (!instruction) { box.querySelector('input').focus(); return; }
+  err.hidden = true; box.querySelector('.refine-out').hidden = true;
+  AI.busy(btn, true, 'Refining');
+  const q = QUESTIONS.find(x => x.id === id);
+  const d = await AI.post(API.refineQ, {question: q, instruction, chapter: CH, topic_id: TID});
+  AI.busy(btn, false);
+  if (!d.ok) { err.textContent = d.error; err.hidden = false; return; }
+  proposals[id] = d.question;
+  box.querySelector('.qc-prop').innerHTML = '<div class="dh"><span>' + TYPE[d.question.type] + ' &middot; ' +
+    esc(d.question.difficulty) + '</span></div>' + qBody(d.question);
+  box.querySelector('.refine-out').hidden = false;
+}
+
+$('qlist').addEventListener('click', async e => {
+  const btn = e.target.closest('[data-act], .chip');
+  if (!btn) return;
+  const card = btn.closest('.qcard'), id = +card.dataset.id;
+  const q = QUESTIONS.find(x => x.id === id);
+  const extra = card.querySelector('.qc-extra');
+  const act = btn.classList.contains('chip') ? 'chip' : btn.dataset.act;
+
+  if (act === 'edit') {
+    extra.innerHTML = editForm(q);
+    const f = extra.querySelector('form');
+    f.elements.type.addEventListener('change', () => syncFormType(f));
+    syncFormType(f);
+    f.elements.stem.focus();
+  } else if (act === 'refine') {
+    extra.innerHTML = refineBox();
+    extra.querySelector('input').focus();
+    extra.querySelector('input').addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') { ev.preventDefault(); runRefine(card, id, ev.target.value.trim()); }
+    });
+  } else if (act === 'chip') {
+    card.querySelector('.refine input').value = btn.textContent;
+    runRefine(card, id, btn.textContent);
+  } else if (act === 'runrefine') {
+    runRefine(card, id, card.querySelector('.refine input').value.trim());
+  } else if (act === 'useprop') {
+    AI.busy(btn, true, 'Saving');
+    const err = await saveQuestion(id, Object.assign({visual: q.visual}, proposals[id]), true);
+    if (err) { AI.busy(btn, false); card.querySelector('.refine-err').textContent = err; card.querySelector('.refine-err').hidden = false; }
+  } else if (act === 'close') {
+    extra.innerHTML = '';
+  } else if (act === 'savefix') {
+    const f = card.querySelector('form'), el = f.elements;
+    const question = {type: el.type.value, difficulty: el.difficulty.value, stem: el.stem.value,
+      options: el.options.value.split('\n').map(s => s.trim()).filter(Boolean),
+      answer: letters(el.correct.value), accept: el.accept.value.split('\n').map(s => s.trim()).filter(Boolean),
+      display_answer: el.display_answer.value, unit: el.unit.value, explanation: el.explanation.value,
+      skill_tag: el.skill_tag.value, visual: q.visual};
+    AI.busy(btn, true, 'Saving');
+    const err = await saveQuestion(id, question, false);
+    if (err) { AI.busy(btn, false); f.querySelector('.refine-err').textContent = err; f.querySelector('.refine-err').hidden = false; }
+  } else if (act === 'status') {
+    const d = await AI.post(API.qstatus(id), {status: q.status === 'live' ? 'draft' : 'live'});
+    if (d.ok) { q.status = d.status; renderQuestions(); } else alert(d.error);
+  } else if (act === 'delete') {
+    if (!confirm('Delete this question? This cannot be undone.')) return;
+    const d = await AI.post(API.qdelete(id));
+    if (d.ok) { QUESTIONS = QUESTIONS.filter(x => x.id !== id); renderQuestions(); } else alert(d.error);
+  }
+});
+
+$('golive').addEventListener('click', async () => {
+  AI.busy($('golive'), true, 'Working');
+  for (const q of QUESTIONS.filter(x => x.status !== 'live')) {
+    const d = await AI.post(API.qstatus(q.id), {status: 'live'});
+    if (d.ok) q.status = 'live';
+  }
+  AI.busy($('golive'), false);
+  renderQuestions();
+});
+
+const genq = $('genq');
+if (genq) genq.addEventListener('click', async () => {
+  const types = [...document.querySelectorAll('input[name=qtype]:checked')].map(i => i.value);
+  const err = $('genqerr'), ok = $('genqok');
+  err.hidden = true; ok.hidden = true;
+  if (!types.length) { err.textContent = 'Tick at least one question type.'; err.hidden = false; return; }
+  await save();
+  AI.busy(genq, true, 'Writing questions, about 30 seconds');
+  const d = await AI.post(API.questions, Object.assign(brief(), {
+    count: +$('qn').value || 5, types, difficulty: $('qdiff').value,
+    instruction: $('qask').value.trim(), draft_md: draft.value}));
+  AI.busy(genq, false);
+  if (!d.ok) { err.textContent = d.error; err.hidden = false; return; }
+  QUESTIONS = QUESTIONS.concat(d.questions);
+  renderQuestions();
+  ok.textContent = 'Added ' + d.questions.length + ' draft question' + (d.questions.length === 1 ? '' : 's') +
+    ' below. Check each answer key, then make them live or publish the topic.';
+  ok.hidden = false;
+  const first = document.querySelector('.qcard[data-id="' + d.questions[0].id + '"]');
+  if (first) first.scrollIntoView({behavior: 'smooth', block: 'center'});
+});
+
+/* ---------------------------------------------------------------- publish */
+async function renderFinal() {
+  const b = brief();
+  const drafts = QUESTIONS.filter(q => q.status !== 'live').length;
+  const live = QUESTIONS.length - drafts;
+  const crit = (b.criteria_text || '').split('\n').map(s => s.trim()).filter(Boolean);
+  const words = draft.value.trim() ? draft.value.trim().split(/\s+/).length : 0;
+  const item = (ok, text) => '<li class="' + (ok ? 'ok' : 'todo') + '">' + text + '</li>';
+  $('checks').innerHTML =
+    item(!!b.objective.trim(), b.objective.trim() ? 'Learning objective set' : 'No learning objective yet (step 1)') +
+    item(crit.length > 0, crit.length ? crit.length + ' success criteria' : 'No success criteria yet (step 1)') +
+    item(words > 0, words ? 'Lesson written, about ' + words + ' words' : 'The lesson is empty (step 2)') +
+    item(QUESTIONS.length > 0, QUESTIONS.length ? live + ' live and ' + drafts + ' draft question' + (drafts === 1 ? '' : 's')
+                                                : 'No questions for this topic yet (step 3)');
+  $('withq').textContent = drafts ? 'Also make the ' + drafts + ' draft question' + (drafts === 1 ? '' : 's') + ' live'
+                                  : 'Also make draft questions live (there are none)';
+  $('fptitle').textContent = b.title;
+  $('fpobj').hidden = !b.objective.trim();
+  $('fpobj').innerHTML = '<b>Learning objective</b> ' + esc(b.objective);
+  $('fpcrit').hidden = !crit.length;
+  $('fpcrit').querySelector('ul').innerHTML = crit.map(c => '<li>' + esc(c) + '</li>').join('');
+  const d = await AI.post(API.render, {md: draft.value});
+  $('fpbody').innerHTML = d.ok && d.html ? d.html : '<p class="muted">The lesson is empty.</p>';
+}
+$('pubform').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (await save()) { dirty = false; e.target.submit(); }
+});
+['pvchapter', 'pvexam'].forEach(id => $(id).addEventListener('click', async e => {
+  if (dirty) { e.preventDefault(); const href = e.currentTarget.href; if (await save()) window.open(href, '_blank'); }
+}));
+
+/* ------------------------------------------------------------------ start */
+renderQuestions();
+show('{{ step }}');
+if (AUTOGEN && !draft.value.trim()) { show('content'); writeLesson(false); }
+</script>
+{% endblock %}

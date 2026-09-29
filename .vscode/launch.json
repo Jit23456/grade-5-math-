@@ -34,7 +34,7 @@
       "type": "debugpy",
       "request": "launch",
       "module": "gunicorn",
-      "args": ["-w", "4", "-b", "127.0.0.1:8000", "wsgi:application"],
+      "args": ["-w", "4", "--threads", "4", "--timeout", "180", "-b", "127.0.0.1:8000", "wsgi:application"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "env": {

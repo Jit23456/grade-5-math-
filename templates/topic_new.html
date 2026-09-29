@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% import "_topic_fields.html" as tf %}
+{% block title %}New topic &middot; Ch {{ ch.number }} &middot; {{ course }}{% endblock %}
+{% block body %}
+<main><div class="wrap narrow">
+  <p class="eyebrow">Chapter {{ ch.number }} &middot; {{ ch.title }}</p>
+  <h2 class="sec">New topic</h2>
+  {% if via == 'ai' %}
+  <ol class="steps">
+    <li class="done">Chapter</li><li class="on">Topic brief</li><li>Lesson</li><li>Assessment</li><li>Publish</li>
+  </ol>
+  {% endif %}
+  <p class="intro">Describe the lesson before anything is written. The AI assistant writes the
+    lesson and its questions from this brief, so the more you fill in, the closer the first
+    draft will be. Only the title is required, and you can change all of it later.</p>
+
+  <form class="card" method="post" id="briefform">
+    <input type="hidden" name="via" value="{{ via }}">
+    {{ tf.fields(None, LEVELS) }}
+
+    {% if ai_ready %}
+    <div class="aihelp">
+      <button type="button" class="btn light sm" id="suggest">&#10022; Suggest the rest with AI</button>
+      <span>Fills the empty fields from the chapter and the title. Check what it suggests.</span>
+      <p class="refine-err bad" id="suggesterr" hidden></p>
+    </div>
+    {% endif %}
+
+    <button class="btn blue" type="submit">
+      {% if via == 'ai' and ai_ready %}Create topic and write the lesson with AI{% else %}Create topic{% endif %}</button>
+    <a class="btn light" href="{{ url_for('edit_chapter', number=ch.number) }}#topics">Cancel</a>
+  </form>
+</div></main>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='ai.js') }}"></script>
+<script>
+const form = document.getElementById('briefform');
+const btn = document.getElementById('suggest');
+if (btn) btn.addEventListener('click', async () => {
+  const data = Object.fromEntries(new FormData(form));
+  const err = document.getElementById('suggesterr');
+  err.hidden = true;
+  if (!data.title.trim()) { err.textContent = 'Give the topic a title first.'; err.hidden = false; return; }
+  AI.busy(btn, true, 'Thinking');
+  const d = await AI.post('{{ url_for("ai_brief") }}', Object.assign(data, {chapter: {{ ch.number }}}));
+  AI.busy(btn, false);
+  if (!d.ok) { err.textContent = d.error; err.hidden = false; return; }
+  for (const [k, v] of Object.entries(d.brief)) {
+    const f = form.elements[k];
+    if (f && !f.value.trim() && v) { f.value = v; f.classList.add('filled'); }
+  }
+});
+</script>
+{% endblock %}

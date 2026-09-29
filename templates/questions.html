@@ -2,23 +2,28 @@
 {% block title %}Questions &middot; Ch {{ ch.number }} &middot; {{ course }}{% endblock %}
 {% block body %}
 <main><div class="wrap">
-  <p class="eyebrow">Chapter {{ ch.number }} &middot; {{ ch.title }}</p>
+  <p class="eyebrow"><a href="{{ url_for('edit_chapter', number=ch.number) }}">Chapter {{ ch.number }} &middot; {{ ch.title }}</a></p>
   <h2 class="sec">Assessment questions</h2>
   <p class="intro">{{ questions|length }} question{{ '' if questions|length == 1 else 's' }} in this chapter.
+    Students see the live ones on the chapter's assessment page; drafts stay hidden.</p>
+  <p style="margin:-12px 0 22px">
     <a class="btn blue sm" href="{{ url_for('edit_question', number=ch.number) }}">Add a question</a>
-    <a class="btn light sm" href="{{ url_for('chapter', number=ch.number) }}">View chapter</a></p>
+    <a class="btn light sm" href="{{ url_for('assessment', number=ch.number) }}">Student view</a>
+    <a class="btn light sm" href="{{ url_for('assessment', number=ch.number, preview=1) }}">Preview with drafts</a></p>
 
   {% if questions %}
   <table class="data">
     <tr><th class="c" style="width:40px">#</th><th style="width:120px">Type</th><th>Stem</th>
-        <th style="width:110px">Origin</th><th style="width:150px">Actions</th></tr>
+        <th style="width:90px">Status</th><th style="width:110px">Origin</th><th style="width:150px">Actions</th></tr>
     {% for q in questions %}
     <tr>
       <td class="c">{{ loop.index }}</td>
       <td>{{ {'mcq':'Multiple choice','multi':'Multi-select','fill':'Fill in the blank'}[q.type] }}</td>
       <td>{{ q.stem[:110] }}{% if q.stem|length > 110 %}&hellip;{% endif %}
         <div style="font-family:var(--mono);font-size:11px;color:var(--ink-2);margin-top:3px">
-          answer: {{ q.display_answer }} &middot; {{ q.difficulty }}{% if q.skill_tag %} &middot; {{ q.skill_tag }}{% endif %}</div></td>
+          answer: {{ q.display_answer }} &middot; {{ q.difficulty }}{% if q.skill_tag %} &middot; {{ q.skill_tag }}{% endif %}
+          {% if q.topic_title %} &middot; topic: {{ q.topic_title }}{% endif %}</div></td>
+      <td>{% if q.status == 'live' %}<span class="badge manual">live</span>{% else %}<span class="badge draft">draft</span>{% endif %}</td>
       <td><span class="badge {{ q.source }}">{{ SOURCES[q.source][0] if q.source in SOURCES else q.source }}</span></td>
       <td>
         <a class="btn light sm" href="{{ url_for('edit_question', number=ch.number, qid=q.id) }}">Edit</a>

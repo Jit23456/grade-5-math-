@@ -7,7 +7,7 @@ Teachers sign in to write content by hand or to generate a draft with the
 AI assistant. Every piece of content is tagged with its origin so a reader
 can always tell curriculum text from teacher-written text from AI drafts.
 """
-import os, json, sqlite3, secrets, urllib.request, urllib.error, urllib.parse, re, base64
+import os, json, sqlite3, secrets, urllib.request, urllib.error, urllib.parse, re, base64, time
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 
@@ -105,9 +105,38 @@ CREATE TABLE IF NOT EXISTS chapters (
   created TEXT NOT NULL,
   updated TEXT NOT NULL
 );
+-- A topic is one lesson inside a chapter. The fields above body_md are the
+-- teacher's brief for the lesson; the AI assistant writes from them. Teachers
+-- work on draft_md, and students only ever see body_md, which publishing
+-- copies across, so a half-finished edit never reaches a class.
+CREATE TABLE IF NOT EXISTS topics (
+  id INTEGER PRIMARY KEY,
+  chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+  position INTEGER NOT NULL DEFAULT 1,
+  title TEXT NOT NULL,
+  objective TEXT NOT NULL DEFAULT '',
+  success_criteria TEXT NOT NULL DEFAULT '[]',
+  prior_knowledge TEXT NOT NULL DEFAULT '',
+  vocab TEXT NOT NULL DEFAULT '[]',
+  misconceptions TEXT NOT NULL DEFAULT '',
+  context TEXT NOT NULL DEFAULT '',
+  level TEXT NOT NULL DEFAULT 'core',
+  duration INTEGER NOT NULL DEFAULT 45,
+  notes TEXT NOT NULL DEFAULT '',
+  body_md TEXT NOT NULL DEFAULT '',
+  draft_md TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'draft',
+  source TEXT NOT NULL DEFAULT 'manual',
+  author TEXT NOT NULL DEFAULT '',
+  created TEXT NOT NULL,
+  updated TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_topic_chapter ON topics(chapter_id, position);
 CREATE TABLE IF NOT EXISTS questions (
   id INTEGER PRIMARY KEY,
   chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+  topic_id INTEGER REFERENCES topics(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'live',
   position INTEGER NOT NULL DEFAULT 1,
   type TEXT NOT NULL DEFAULT 'mcq',
   stem TEXT NOT NULL DEFAULT '',
@@ -193,6 +222,15 @@ def init_db():
         pass
     con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone"
                 " ON users(phone) WHERE phone <> ''")
+    # and the topic link and draft status added with topics
+    for ddl in ("ALTER TABLE questions ADD COLUMN topic_id INTEGER"
+                " REFERENCES topics(id) ON DELETE SET NULL",
+                "ALTER TABLE questions ADD COLUMN status TEXT NOT NULL DEFAULT 'live'"):
+        try:
+            con.execute(ddl)
+        except sqlite3.OperationalError:
+            pass
+    con.execute("CREATE INDEX IF NOT EXISTS idx_q_topic ON questions(topic_id)")
 
     con.execute("BEGIN IMMEDIATE")
     have = con.execute("SELECT COUNT(*) c FROM chapters").fetchone()["c"]
@@ -219,8 +257,9 @@ def init_db():
                      q["display_answer"], q["unit"], q.get("visual", ""), q["explanation"],
                      q["skill_tag"], q["difficulty"], now()))
         print("seeded %d chapters" % len(seed["chapters"]))
+    split_lessons(con)
 
-    users = con.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
+    users =con.execute("SELECT COUNT(*) c FROM users").fetchone()["c"]
     created_pw = None
     if users == 0:
         pw = os.environ.get("MATH5_ADMIN_PASSWORD")
@@ -239,6 +278,35 @@ def init_db():
         print("  password: %s" % created_pw)
         print("  Change it from the teacher dashboard after signing in.")
         print("=" * 58 + "\n")
+
+
+LESSON_HEAD = re.compile(r"^###\s+Lesson\b[ \t]*[\d.]*[ \t]*[-–—:]?[ \t]*(.*)$", re.M)
+
+
+def split_lessons(con):
+    """Chapters used to hold every lesson in one Markdown field, each starting
+    with '### Lesson 1.1 - Title'. Turn each of those into its own topic, and
+    keep whatever came before the first lesson as the chapter introduction.
+    Runs only for a chapter that has no topics yet, and the heading is gone from
+    the introduction afterwards, so it never splits the same chapter twice."""
+    rows = con.execute(
+        "SELECT * FROM chapters c WHERE body_md LIKE '%### Lesson%'"
+        " AND NOT EXISTS (SELECT 1 FROM topics t WHERE t.chapter_id=c.id)").fetchall()
+    for c in rows:
+        body = c["body_md"]
+        heads = list(LESSON_HEAD.finditer(body))
+        if not heads:
+            continue
+        for i, m in enumerate(heads):
+            end = heads[i + 1].start() if i + 1 < len(heads) else len(body)
+            text = body[m.end():end].strip()
+            title = m.group(1).strip() or "Lesson %d" % (i + 1)
+            con.execute(
+                "INSERT INTO topics (chapter_id,position,title,body_md,draft_md,status,"
+                "source,author,created,updated) VALUES (?,?,?,?,?,'published',?,?,?,?)",
+                (c["id"], i + 1, title, text, text, c["source"], c["author"], now(), now()))
+        con.execute("UPDATE chapters SET body_md=? WHERE id=?",
+                    (body[:heads[0].start()].strip(), c["id"]))
 
 
 # ------------------------------------------------------------------- helpers
@@ -368,17 +436,24 @@ def chapter_row(number):
     return r
 
 
-def questions_for(cid):
-    rows = db().execute(
-        "SELECT * FROM questions WHERE chapter_id=? ORDER BY position, id", (cid,)).fetchall()
-    out = []
-    for r in rows:
-        d = dict(r)
-        d["options"] = jl(r["options"])
-        d["answer"] = jl(r["answer"])
-        d["accept"] = jl(r["accept"])
-        out.append(d)
-    return out
+def question_dict(r):
+    d = dict(r)
+    d["options"] = jl(r["options"])
+    d["answer"] = jl(r["answer"])
+    d["accept"] = jl(r["accept"])
+    return d
+
+
+def questions_for(cid, live_only=False, topic_id=None):
+    sql = "SELECT * FROM questions WHERE chapter_id=?"
+    args = [cid]
+    if live_only:
+        sql += " AND status='live'"
+    if topic_id is not None:
+        sql += " AND topic_id=?"
+        args.append(topic_id)
+    rows = db().execute(sql + " ORDER BY position, id", args).fetchall()
+    return [question_dict(r) for r in rows]
 
 
 def chapter_dict(r):
@@ -388,12 +463,89 @@ def chapter_dict(r):
     d["vocab"] = jl(r["vocab"])
     d["summary"] = jl(r["summary"])
     d["body_html"] = render_md(r["body_md"])
-    d["lesson_count"] = r["body_md"].count("### Lesson")
     return d
 
 
 def split_lines(text):
     return [x.strip() for x in (text or "").splitlines() if x.strip()]
+
+
+def parse_vocab(text):
+    out = []
+    for line in split_lines(text):
+        term, _, meaning = line.partition("|")
+        if term.strip():
+            out.append(dict(term=term.strip(), meaning=meaning.strip()))
+    return out
+
+
+def vocab_text(items):
+    return "\n".join("%s | %s" % (v.get("term", ""), v.get("meaning", "")) for v in items)
+
+
+# ------------------------------------------------------------------- topics
+LEVELS = {
+    "support": ("Support", "for students still building the basics: smaller numbers, "
+                           "every step shown, lots of practice"),
+    "core": ("Core", "the expected Grade 5 level"),
+    "extension": ("Extension", "for students ready for a challenge: larger numbers and "
+                               "multi-step problems"),
+}
+
+
+def topic_dict(r):
+    d = dict(r)
+    d["success_criteria"] = jl(r["success_criteria"])
+    d["vocab"] = jl(r["vocab"])
+    d["criteria_text"] = "\n".join(d["success_criteria"])
+    d["vocab_text"] = vocab_text(d["vocab"])
+    d["body_html"] = render_md(r["body_md"])
+    d["draft_html"] = render_md(r["draft_md"])
+    d["dirty"] = r["draft_md"] != r["body_md"] or r["status"] != "published"
+    return d
+
+
+def topics_for(cid, published_only=False):
+    sql = "SELECT * FROM topics WHERE chapter_id=?"
+    if published_only:
+        sql += " AND status='published'"
+    rows = db().execute(sql + " ORDER BY position, id", (cid,)).fetchall()
+    return [topic_dict(r) for r in rows]
+
+
+def topic_row(tid):
+    r = db().execute("SELECT t.*, c.number chapter_number FROM topics t JOIN chapters c"
+                     " ON c.id=t.chapter_id WHERE t.id=?", (tid,)).fetchone()
+    if not r:
+        abort(404)
+    return r
+
+
+def topic_meta(src):
+    """Read the lesson brief from a form or a JSON body. Lists arrive as text,
+    one item per line, exactly as the teacher typed them."""
+    level = src.get("level") or "core"
+    try:
+        duration = max(5, min(240, int(src.get("duration") or 45)))
+    except (TypeError, ValueError):
+        duration = 45
+    return dict(
+        title=(src.get("title") or "").strip(),
+        objective=(src.get("objective") or "").strip(),
+        success_criteria=split_lines(src.get("criteria_text")),
+        prior_knowledge=(src.get("prior_knowledge") or "").strip(),
+        vocab=parse_vocab(src.get("vocab_text")),
+        misconceptions=(src.get("misconceptions") or "").strip(),
+        context=(src.get("context") or "").strip(),
+        level=level if level in LEVELS else "core",
+        duration=duration,
+        notes=(src.get("notes") or "").strip(),
+    )
+
+
+def is_preview():
+    """A signed-in teacher can add ?preview=1 to see drafts as a student would."""
+    return bool(current_user()) and request.args.get("preview") == "1"
 
 
 STRANDS = ["Number", "Computational Fluency", "Patterning",
@@ -435,13 +587,15 @@ def bar_segments(pairs, width=200, gap=2):
 @app.route("/")
 def index():
     rows = db().execute(
-        "SELECT c.*, (SELECT COUNT(*) FROM questions q WHERE q.chapter_id=c.id) nq "
+        "SELECT c.*, (SELECT COUNT(*) FROM questions q WHERE q.chapter_id=c.id"
+        " AND q.status='live') nq, (SELECT COUNT(*) FROM topics t WHERE t.chapter_id=c.id"
+        " AND t.status='published') nt "
         "FROM chapters c WHERE c.published=1 ORDER BY c.number").fetchall()
     chapters = []
     for r in rows:
         chapters.append(dict(number=r["number"], title=r["title"], strand=r["strand"],
                              standard=r["standard"], lede=r["lede"], source=r["source"],
-                             nq=r["nq"], lessons=r["body_md"].count("### Lesson")))
+                             nq=r["nq"], lessons=r["nt"]))
     stats = dict(
         chapters=len(chapters),
         lessons=sum(c["lessons"] for c in chapters),
@@ -453,7 +607,7 @@ def index():
     strand_chart, _ = bar_segments([(s, STRAND_COLORS[s], len(cs)) for s, cs in by_strand])
     qtypes = dict(db().execute(
         "SELECT q.type, COUNT(*) FROM questions q JOIN chapters c ON c.id=q.chapter_id"
-        " WHERE c.published=1 GROUP BY q.type").fetchall())
+        " WHERE c.published=1 AND q.status='live' GROUP BY q.type").fetchall())
     type_chart, _ = bar_segments([(TYPE_LABELS[t], TYPE_COLORS[t], qtypes.get(t, 0))
                                   for t in ("fill", "mcq", "multi")])
     return render_template("index.html", chapters=chapters, stats=stats,
@@ -461,18 +615,45 @@ def index():
                            type_chart=type_chart)
 
 
-@app.route("/chapter/<int:number>")
-def chapter(number):
-    r = chapter_row(number)
-    if not r["published"] and not current_user():
-        abort(404)
-    c = chapter_dict(r)
-    qs = questions_for(r["id"])
+def neighbours(number):
     nums = [x["number"] for x in db().execute(
         "SELECT number FROM chapters WHERE published=1 ORDER BY number").fetchall()]
     i = nums.index(number) if number in nums else -1
-    prev_n = nums[i - 1] if i > 0 else None
-    next_n = nums[i + 1] if 0 <= i < len(nums) - 1 else None
+    return (nums[i - 1] if i > 0 else None,
+            nums[i + 1] if 0 <= i < len(nums) - 1 else None)
+
+
+def public_chapter(number):
+    r = chapter_row(number)
+    if not r["published"] and not current_user():
+        abort(404)
+    return r
+
+
+@app.route("/chapter/<int:number>")
+def chapter(number):
+    """The lessons. The assessment has a page of its own, reached from the end."""
+    r = public_chapter(number)
+    preview = is_preview()
+    c = chapter_dict(r)
+    topics = topics_for(r["id"], published_only=not preview)
+    for t in topics:
+        t["show_html"] = t["draft_html"] if preview else t["body_html"]
+    nq = len(questions_for(r["id"], live_only=not preview))
+    prev_n, next_n = neighbours(number)
+    return render_template("chapter.html", c=c, topics=topics, nq=nq, preview=preview,
+                           prev_n=prev_n, next_n=next_n)
+
+
+@app.route("/chapter/<int:number>/assessment")
+def assessment(number):
+    r = public_chapter(number)
+    preview = is_preview()
+    c = chapter_dict(r)
+    qs = questions_for(r["id"], live_only=not preview)
+    titles = {t["id"]: t["title"] for t in topics_for(r["id"])}
+    for q in qs:
+        q["topic_title"] = titles.get(q["topic_id"], "")
     quiz = {}
     for q in qs:
         quiz["q%d" % q["id"]] = dict(t=q["type"], why=q["explanation"],
@@ -483,9 +664,10 @@ def chapter(number):
         tally[q["type"]] = tally.get(q["type"], 0) + 1
     comp_chart, _ = bar_segments([(TYPE_LABELS[t], TYPE_COLORS[t], tally.get(t, 0))
                                   for t in ("fill", "mcq", "multi")])
-    return render_template("chapter.html", c=c, questions=qs, quiz_json=json.dumps(quiz),
-                           prev_n=prev_n, next_n=next_n, tally=tally, comp_chart=comp_chart,
-                           all_numbers=nums)
+    prev_n, next_n = neighbours(number)
+    return render_template("assessment.html", c=c, questions=qs, quiz_json=json.dumps(quiz),
+                           tally=tally, comp_chart=comp_chart, preview=preview,
+                           prev_n=prev_n, next_n=next_n)
 
 
 @app.route("/api/course.json")
@@ -498,12 +680,21 @@ def course_json():
                  elaborations=jl(r["elaborations"]), big_idea=r["big_idea"],
                  learning_goals=jl(r["goals"]), vocabulary=jl(r["vocab"]),
                  summary=jl(r["summary"]), source=r["source"], author=r["author"],
-                 published=bool(r["published"]), questions=[])
-        for q in questions_for(r["id"]):
-            c["questions"].append({k: q[k] for k in
-                ("position", "type", "stem", "options", "answer", "accept",
-                 "display_answer", "unit", "visual", "explanation", "skill_tag",
-                 "difficulty", "source")})
+                 published=bool(r["published"]), topics=[], questions=[])
+        titles = {}
+        for t in topics_for(r["id"], published_only=True):
+            titles[t["id"]] = t["title"]
+            c["topics"].append({k: t[k] for k in
+                ("position", "title", "objective", "success_criteria", "prior_knowledge",
+                 "vocab", "misconceptions", "context", "level", "duration", "body_md",
+                 "source")})
+        for q in questions_for(r["id"], live_only=True):
+            d = {k: q[k] for k in
+                 ("position", "type", "stem", "options", "answer", "accept",
+                  "display_answer", "unit", "visual", "explanation", "skill_tag",
+                  "difficulty", "source")}
+            d["topic"] = titles.get(q["topic_id"], "")
+            c["questions"].append(d)
         out.append(c)
     return Response(json.dumps(dict(course="Mathematics 5", grade=5,
                     curriculum="British Columbia", chapter_count=len(out),
@@ -734,12 +925,16 @@ def delete_user(uid):
 @login_required
 def dashboard():
     rows = db().execute(
-        "SELECT c.*, (SELECT COUNT(*) FROM questions q WHERE q.chapter_id=c.id) nq "
+        "SELECT c.*, (SELECT COUNT(*) FROM questions q WHERE q.chapter_id=c.id) nq,"
+        " (SELECT COUNT(*) FROM topics t WHERE t.chapter_id=c.id) nt,"
+        " (SELECT COUNT(*) FROM topics t WHERE t.chapter_id=c.id AND"
+        "  (t.status<>'published' OR t.draft_md<>t.body_md)) + (SELECT COUNT(*) FROM"
+        "  questions q WHERE q.chapter_id=c.id AND q.status<>'live') ndraft "
         "FROM chapters c ORDER BY c.number").fetchall()
     chapters = [dict(number=r["number"], title=r["title"], strand=r["strand"],
                      source=r["source"], author=r["author"], nq=r["nq"],
                      published=r["published"], updated=r["updated"],
-                     lessons=r["body_md"].count("### Lesson")) for r in rows]
+                     lessons=r["nt"], drafts=r["ndraft"]) for r in rows]
     counts = {}
     for r in rows:
         counts[r["source"]] = counts.get(r["source"], 0) + 1
@@ -774,11 +969,8 @@ def edit_chapter(number=None):
         if not title:
             flash("A chapter needs a title.", "error")
             return redirect(request.path)
-        vocab = []
-        for line in split_lines(f.get("vocab")):
-            term, _, meaning = line.partition("|")
-            vocab.append(dict(term=term.strip(), meaning=meaning.strip()))
-        vals = (num, title, f.get("strand", "Number"), f.get("standard", "").strip(),
+        vocab = parse_vocab(f.get("vocab"))
+        vals =(num, title, f.get("strand", "Number"), f.get("standard", "").strip(),
                 json.dumps(split_lines(f.get("elaborations"))),
                 f.get("big_idea", "").strip(), f.get("lede", "").strip(),
                 json.dumps(split_lines(f.get("goals"))), json.dumps(vocab),
@@ -801,23 +993,29 @@ def edit_chapter(number=None):
                 vals + (src, current_user()["display_name"], now(), row["id"]))
             db().commit()
             flash("Chapter %d saved." % num, "ok")
-            return redirect(url_for("chapter", number=num))
-        cur = db().execute(
+            return redirect(url_for("edit_chapter", number=num))
+        db().execute(
             "INSERT INTO chapters (number,title,strand,standard,elaborations,big_idea,"
             "lede,goals,vocab,body_md,summary,visual,published,source,author,created,updated)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             vals + (f.get("source") or "manual", current_user()["display_name"], now(), now()))
         db().commit()
-        flash("Chapter %d created." % num, "ok")
-        return redirect(url_for("chapter", number=num))
+        flash("Chapter %d created. Now add its topics." % num, "ok")
+        return redirect(url_for("edit_chapter", number=num))
 
     c = chapter_dict(row) if row else None
     if c:
-        c["vocab_text"] = "\n".join("%s | %s" % (v.get("term", ""), v.get("meaning", ""))
-                                    for v in c["vocab"])
+        c["vocab_text"] = vocab_text(c["vocab"])
     nxt = db().execute("SELECT COALESCE(MAX(number),0)+1 n FROM chapters").fetchone()["n"]
+    topics = topics_for(row["id"]) if row else []
+    if row:
+        counts = dict(db().execute(
+            "SELECT topic_id, COUNT(*) FROM questions WHERE chapter_id=? GROUP BY topic_id",
+            (row["id"],)).fetchall())
+        for t in topics:
+            t["nq"] = counts.get(t["id"], 0)
     return render_template("chapter_edit.html", c=c, strands=STRANDS, next_number=nxt,
-                           prefill=session.pop("prefill_chapter", None))
+                           topics=topics, LEVELS=LEVELS)
 
 
 @app.route("/teacher/chapter/<int:number>/delete", methods=["POST"])
@@ -883,14 +1081,22 @@ def edit_question(number, qid=None):
                          (qid, ch["id"])).fetchone()
         if not q:
             abort(404)
+    topics = topics_for(ch["id"])
+    # Where to go afterwards: back to the topic workspace when we came from one.
+    nxt = request.values.get("next", "")
+    if not nxt.startswith("/"):
+        nxt = url_for("questions_list", number=number)
     if request.method == "POST":
         data, err = read_question_form(request.form)
         if err:
             flash(err, "error")
-            return redirect(request.path)
+            return redirect(request.full_path)
         if not data["stem"]:
             flash("A question needs a stem.", "error")
-            return redirect(request.path)
+            return redirect(request.full_path)
+        tid = request.form.get("topic_id", "")
+        tid = int(tid) if tid.isdigit() and int(tid) in {t["id"] for t in topics} else None
+        status = "draft" if request.form.get("status") == "draft" else "live"
         if q:
             src = q["source"]
             if src == "curriculum":
@@ -898,21 +1104,22 @@ def edit_question(number, qid=None):
             db().execute(
                 "UPDATE questions SET type=?,stem=?,options=?,answer=?,accept=?,"
                 "display_answer=?,unit=?,visual=?,explanation=?,skill_tag=?,difficulty=?,"
-                "source=?,author=? WHERE id=?",
+                "source=?,author=?,topic_id=?,status=? WHERE id=?",
                 (data["type"], data["stem"], json.dumps(data["options"]),
                  json.dumps(data["answer"]), json.dumps(data["accept"]),
                  data["display_answer"], data["unit"], data["visual"], data["explanation"],
                  data["skill_tag"], data["difficulty"], src,
-                 current_user()["display_name"], q["id"]))
+                 current_user()["display_name"], tid, status, q["id"]))
             flash("Question saved.", "ok")
         else:
             pos = db().execute("SELECT COALESCE(MAX(position),0)+1 p FROM questions"
                                " WHERE chapter_id=?", (ch["id"],)).fetchone()["p"]
             db().execute(
-                "INSERT INTO questions (chapter_id,position,type,stem,options,answer,"
-                "accept,display_answer,unit,visual,explanation,skill_tag,difficulty,source,"
-                "author,created) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (ch["id"], pos, data["type"], data["stem"], json.dumps(data["options"]),
+                "INSERT INTO questions (chapter_id,topic_id,status,position,type,stem,options,"
+                "answer,accept,display_answer,unit,visual,explanation,skill_tag,difficulty,"
+                "source,author,created) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (ch["id"], tid, status, pos, data["type"], data["stem"],
+                 json.dumps(data["options"]),
                  json.dumps(data["answer"]), json.dumps(data["accept"]),
                  data["display_answer"], data["unit"], data["visual"], data["explanation"],
                  data["skill_tag"], data["difficulty"],
@@ -920,23 +1127,23 @@ def edit_question(number, qid=None):
                  current_user()["display_name"], now()))
             flash("Question added.", "ok")
         db().commit()
-        return redirect(url_for("questions_list", number=number))
+        return redirect(nxt)
 
-    qd = None
-    if q:
-        qd = dict(q)
-        qd["options"] = jl(q["options"])
-        qd["answer"] = jl(q["answer"])
-        qd["accept"] = jl(q["accept"])
-    return render_template("question_edit.html", ch=ch, q=qd,
-                           prefill=session.pop("prefill_question", None))
+    qd = question_dict(q) if q else None
+    pick = request.args.get("topic", "")
+    return render_template("question_edit.html", ch=ch, q=qd, topics=topics, next=nxt,
+                           topic_pick=int(pick) if pick.isdigit() else None)
 
 
 @app.route("/teacher/chapter/<int:number>/questions")
 @login_required
 def questions_list(number):
     ch = chapter_row(number)
-    return render_template("questions.html", ch=ch, questions=questions_for(ch["id"]))
+    qs = questions_for(ch["id"])
+    titles = {t["id"]: t["title"] for t in topics_for(ch["id"])}
+    for q in qs:
+        q["topic_title"] = titles.get(q["topic_id"], "")
+    return render_template("questions.html", ch=ch, questions=qs)
 
 
 @app.route("/teacher/question/<int:qid>/delete", methods=["POST"])
@@ -949,33 +1156,20 @@ def delete_question(qid):
     db().execute("DELETE FROM questions WHERE id=?", (qid,))
     db().commit()
     flash("Question deleted.", "ok")
-    return redirect(url_for("questions_list", number=q["number"]))
+    nxt = request.form.get("next", "")
+    return redirect(nxt if nxt.startswith("/") else
+                    url_for("questions_list", number=q["number"]))
 
 
 # ------------------------------------------------------------- AI assistant
-PROMPTS = {
- "lesson": """Write one lesson for a Grade 5 mathematics chapter in British Columbia.
+STYLE_RULES = """House style: British Columbia Grade 5 level, plain language a
+10-year-old reads comfortably. Use ASCII only inside code blocks, no unicode box
+characters. Write x for multiplication, never the times sign. Separate thousands
+with a space, as in 1 250 000. Use Canadian spelling and Canadian contexts
+(dollars and cents, metric units). Every number you write must be correct: work
+each calculation out before you write it down."""
 
-Return Markdown only, in exactly this shape:
-
-### Lesson <number> - <short title>
-
-<one or two sentences stating the concept plainly>
-
-<a fenced code block showing a worked example, laid out step by step>
-
-<a short paragraph or a small Markdown table if it helps>
-
-> **Watch out.** <the single most common student error, and how to avoid it>
-
-Rules: British Columbia Grade 5 level. Plain language a 10-year-old reads comfortably.
-Use ASCII only inside code blocks, no unicode box characters. Do not use the
-multiplication sign; write x. Separate thousands with a space, as in 1 250 000.
-No preamble, no closing remarks, no headings other than the one shown.""",
-
- "questions": """Write assessment questions for a Grade 5 mathematics chapter in British Columbia.
-
-Return a JSON array only. No prose, no markdown fences. Each element:
+QUESTION_SHAPE = """Each question is a JSON object in one of these three shapes:
 
 {"type":"mcq","stem":"...","options":["...","...","...","..."],"answer":[2],
  "explanation":"why the correct option is correct","skill_tag":"short-kebab-tag",
@@ -987,68 +1181,167 @@ Return a JSON array only. No prose, no markdown fences. Each element:
 {"type":"fill","stem":"...","accept":["42","42.0"],"display_answer":"42",
  "unit":"","explanation":"...","skill_tag":"...","difficulty":"..."}
 
-Rules: "answer" holds zero-based indexes into "options". mcq has exactly one
-index; multi has two or more. For fill, "accept" lists every spelling a
-student might reasonably type, including forms with and without spaces in
-numbers. Every arithmetic answer must be correct: check it before writing it.
-Grade 5 level, plain language. Write x for multiplication, not the times sign.""",
+"answer" holds zero-based indexes into "options". mcq has exactly one index and
+four options; multi has two or more correct indexes and five options. For fill,
+"accept" lists every spelling a student might reasonably type, including forms
+with and without spaces in numbers, and "unit" is a label shown beside the box
+(such as "cm"), or empty. Wrong options should be the answers a student would
+get by making a real mistake, not random numbers."""
 
- "explain": """Explain this Grade 5 mathematics idea for a teacher to read aloud to the class.
-Return plain Markdown: two or three short paragraphs, then a worked example in a
-fenced code block, then one line beginning "Watch out." naming the usual student error.
-No preamble. Plain language. Write x for multiplication.""",
+PROMPTS = {
+ "lesson": """You write lessons for a Grade 5 mathematics course in British Columbia,
+Canada. A teacher has written a brief for one lesson. Follow it closely: teach the
+learning objective, cover every success criterion, use and explain the key
+vocabulary, tackle the misconceptions head on, build on the prior knowledge, use
+the real-world context if one is given, and pitch it at the level asked for. Fit
+the amount of material to the lesson length.
 
- "rewrite": """Rewrite the text below so a Grade 5 student who finds reading difficult can
-follow it. Keep every mathematical fact exactly as it is. Use shorter sentences
-and commoner words. Keep any code blocks and tables. Return Markdown only, no
-preamble and no commentary on what you changed.""",
+Return Markdown only, in this shape:
 
- "vocab": """List the key vocabulary for this Grade 5 mathematics topic.
-Return one term per line in the form:
+<one or two sentences introducing the idea plainly>
 
-Term | A plain-language meaning in one sentence
+#### Key idea
+<the concept, explained simply; a small table if it helps>
 
-Six to eight terms. No preamble, no numbering, no markdown formatting.""",
+#### Worked example
+<a fenced code block laying out one example step by step>
+
+<a second worked example, harder than the first, if the lesson is 40 minutes or more>
+
+#### Try it
+<three short practice questions, then a line "Answers: ..." giving each answer>
+
+> **Watch out.** <the most common student error for this lesson, and how to avoid it>
+
+Do not start with a heading naming the lesson: the page already shows the title.
+Use #### for headings, never # or ##. No preamble and no closing remarks.
+
+""" + STYLE_RULES,
+
+ "questions": """You write assessment questions for a Grade 5 mathematics course in
+British Columbia, Canada. A teacher has written a brief for one lesson, and may
+include the lesson text. Test exactly what the brief sets out: spread the
+questions across the success criteria, use the misconceptions to write the wrong
+options, and keep the numbers and contexts the lesson uses.
+
+Return one JSON object and nothing else, no prose and no markdown fences:
+{"questions": [ ... ]}
+
+""" + QUESTION_SHAPE + "\n\n" + STYLE_RULES,
+
+ "refine": """You help a Grade 5 mathematics teacher in British Columbia improve a
+piece of course material. You are given background about the course (for
+reference only, never to be copied into your answer), a note on what the text
+is, the teacher's instruction, and the text itself. Apply the instruction to the
+text and return the whole revised text. Change only what the instruction asks for and keep
+everything else. Keep the same format as the input: Markdown stays Markdown, a
+list with one item per line stays one item per line, and "Term | meaning" lines
+stay in that form. If you find a mathematical error, correct it. If the text is
+empty, write it from scratch using the context you are given.
+
+Return only the revised text: no preamble, no notes on what you changed, and no
+code fence around the whole answer.
+
+""" + STYLE_RULES,
+
+ "refine_question": """You help a Grade 5 mathematics teacher in British Columbia
+improve one assessment question. Apply the teacher's instruction and return the
+revised question. Change only what the instruction asks for. Keep the same
+question type unless the instruction asks for a different one. Always check that
+the answer key is correct, and fix it if it is not.
+
+Return one JSON object and nothing else, no prose and no markdown fences.
+
+""" + QUESTION_SHAPE + "\n\n" + STYLE_RULES,
+
+ "brief": """You help a Grade 5 mathematics teacher in British Columbia plan a lesson.
+From the chapter details and the lesson title, suggest the lesson brief. Anything
+the teacher has already filled in is given too: keep it as it is and only fill
+the empty parts, unless it is plainly wrong for this lesson.
+
+Return one JSON object and nothing else, no prose and no markdown fences:
+{"objective": "Students will ... (one sentence)",
+ "success_criteria": ["I can ...", "I can ...", "I can ..."],
+ "prior_knowledge": "what students need to know already, one or two sentences",
+ "vocab": [{"term": "...", "meaning": "a plain-language meaning in one sentence"}],
+ "misconceptions": "the one or two mistakes students most often make here",
+ "context": "a real-world setting a 10-year-old in BC knows, for examples"}
+
+Three or four success criteria. Four to six vocabulary terms.""",
 }
 
 
-def call_ai(system, user, max_tokens=2000):
+def call_ai(system, user, max_tokens=8000):
     """POST to the Groq chat completions API. Returns (text, error)."""
     if not API_KEY:
         return None, ("The AI assistant is switched off because no API key is set. "
                       "Set GROQ_API_KEY in the environment and restart the server.")
-    payload = json.dumps({
+    body = {
         "model": API_MODEL,
+        # Reasoning models spend part of this budget thinking before they
+        # answer, so it has to be well above the length of the answer itself.
         "max_tokens": max_tokens,
+        "temperature": 0.5,
         "messages": [{"role": "system", "content": system},
                      {"role": "user", "content": user}],
-    }).encode()
+    }
+    if API_MODEL.startswith("openai/gpt-oss"):
+        body["reasoning_effort"] = "low"
+    payload = json.dumps(body).encode()
     req = urllib.request.Request(API_URL, data=payload, method="POST", headers={
         "content-type": "application/json",
         "authorization": "Bearer " + API_KEY,
         # Groq rejects urllib's default User-Agent.
         "user-agent": "math5-platform/1.0",
     })
-    try:
-        with urllib.request.urlopen(req, timeout=120) as r:
-            body = json.loads(r.read().decode())
-    except urllib.error.HTTPError as e:
+    for attempt in (1, 2):
         try:
-            msg = json.loads(e.read().decode())["error"]["message"]
-        except Exception:
-            msg = "HTTP %s from the API." % e.code
-        return None, msg
-    except urllib.error.URLError as e:
-        return None, "Could not reach the API: %s" % e.reason
-    except Exception as e:
-        return None, "Unexpected error: %s" % e
+            with urllib.request.urlopen(req, timeout=120) as r:
+                body = json.loads(r.read().decode())
+            break
+        except urllib.error.HTTPError as e:
+            try:
+                msg = json.loads(e.read().decode())["error"]["message"]
+            except Exception:
+                msg = "HTTP %s from the API." % e.code
+            if e.code != 429:
+                return None, msg
+            # Groq's free tier caps tokens per minute and says how long to wait.
+            # A short wait is worth it once; a long one goes back to the teacher.
+            m = re.search(r"try again in (?:(\d+)m)?([\d.]+)s", msg)
+            wait = (int(m.group(1) or 0) * 60 + float(m.group(2))) if m else 60
+            if attempt == 1 and wait <= 20:
+                time.sleep(wait + 0.5)
+                continue
+            return None, ("The free AI plan allows only so much writing per minute, and that "
+                          "limit is used up. Wait about %d seconds and try again." % (wait + 1))
+        except urllib.error.URLError as e:
+            return None, "Could not reach the API: %s" % e.reason
+        except Exception as e:
+            return None, "Unexpected error: %s" % e
     try:
-        text = (body["choices"][0]["message"].get("content") or "").strip()
+        choice = body["choices"][0]
+        text = (choice["message"].get("content") or "").strip()
     except (KeyError, IndexError, TypeError):
-        text = ""
+        choice, text = {}, ""
     if not text:
+        if choice.get("finish_reason") == "length":
+            return None, "The answer ran out of room before it finished. Ask for less at once."
         return None, "The API returned no text."
     return text, None
+
+
+def extract_json(text):
+    """Pull the first JSON object or array out of a reply, ignoring any prose or
+    code fences a model put around it."""
+    dec = json.JSONDecoder()
+    for i, ch in enumerate(text):
+        if ch in "{[":
+            try:
+                return dec.raw_decode(text[i:])[0]
+            except ValueError:
+                continue
+    raise ValueError("no JSON found")
 
 
 def log_ai(kind, brief, ok, detail=""):
@@ -1059,136 +1352,498 @@ def log_ai(kind, brief, ok, detail=""):
     db().commit()
 
 
-def strip_fences(t):
-    t = t.strip()
-    t = re.sub(r"^```[a-zA-Z]*\s*", "", t)
-    t = re.sub(r"\s*```$", "", t)
-    return t.strip()
+def clean_question(it, keep_visual=False):
+    """Check one question from the assistant or the topic workspace. Returns
+    (question, error). Indexes out of range are dropped, and a multiple-choice
+    question with more than one right answer becomes a multi-select."""
+    if not isinstance(it, dict):
+        return None, "That is not a question."
+    t = it.get("type", "mcq")
+    if t not in ("mcq", "multi", "fill"):
+        return None, "Unknown question type."
+    diff = it.get("difficulty", "medium")
+    row = dict(type=t, stem=str(it.get("stem") or "").strip(),
+               explanation=str(it.get("explanation") or "").strip(),
+               skill_tag=str(it.get("skill_tag") or "").strip(),
+               difficulty=diff if diff in ("easy", "medium", "hard") else "medium",
+               visual=str(it.get("visual") or "").strip() if keep_visual else "")
+    if not row["stem"]:
+        return None, "A question needs a stem."
+    if t == "fill":
+        acc = [str(x).strip() for x in (it.get("accept") or []) if str(x).strip()]
+        if not acc:
+            return None, "A fill-in-the-blank question needs at least one accepted answer."
+        row.update(options=[], answer=[], accept=acc,
+                   display_answer=str(it.get("display_answer") or acc[0]).strip(),
+                   unit=str(it.get("unit") or "").strip())
+        return row, None
+    opts = [str(x).strip() for x in (it.get("options") or []) if str(x).strip()][:6]
+    ans = []
+    for i in (it.get("answer") or []):
+        try:
+            i = int(i)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= i < len(opts):
+            ans.append(i)
+    ans = sorted(set(ans))
+    if len(opts) < 2:
+        return None, "Give at least two options."
+    if not ans:
+        return None, "Mark at least one option as correct."
+    if t == "mcq" and len(ans) != 1:
+        row["type"] = "multi"
+    keys = ["A", "B", "C", "D", "E", "F"]
+    row.update(options=opts, answer=ans, accept=[], unit="",
+               display_answer=" and ".join(keys[i] for i in ans))
+    return row, None
+
+
+def chapter_brief(ch):
+    goals = jl(ch["goals"])
+    lines = ["Course: British Columbia Mathematics, Grade 5",
+             "Chapter %d: %s" % (ch["number"], ch["title"]),
+             "Strand: %s" % ch["strand"]]
+    if ch["standard"]:
+        lines.append("BC content standard: %s" % ch["standard"])
+    if ch["big_idea"]:
+        lines.append("Big Idea: %s" % ch["big_idea"])
+    if goals:
+        lines.append("Chapter learning goals:\n" + "\n".join("- " + g for g in goals))
+    return "\n".join(lines)
+
+
+def lesson_brief(ch, meta):
+    """Everything the teacher told us about the chapter and this lesson, laid out
+    for the model. Empty fields are left out rather than sent blank."""
+    lines = [chapter_brief(ch), "", "LESSON BRIEF", "Lesson title: %s" % meta["title"]]
+    if meta["objective"]:
+        lines.append("Learning objective: %s" % meta["objective"])
+    if meta["success_criteria"]:
+        lines.append("Success criteria:\n" +
+                     "\n".join("- " + s for s in meta["success_criteria"]))
+    if meta["prior_knowledge"]:
+        lines.append("Prior knowledge: %s" % meta["prior_knowledge"])
+    if meta["vocab"]:
+        lines.append("Key vocabulary:\n" + "\n".join(
+            "- %s: %s" % (v["term"], v["meaning"]) for v in meta["vocab"]))
+    if meta["misconceptions"]:
+        lines.append("Common misconceptions: %s" % meta["misconceptions"])
+    if meta["context"]:
+        lines.append("Real-world context to use: %s" % meta["context"])
+    name, desc = LEVELS[meta["level"]]
+    lines.append("Level: %s, %s" % (name, desc))
+    lines.append("Lesson length: %d minutes" % meta["duration"])
+    if meta["notes"]:
+        lines.append("Teacher's notes: %s" % meta["notes"])
+    return "\n".join(lines)
+
+
+def ai_json():
+    return request.get_json(silent=True) or {}
+
+
+def ai_fail(kind, brief, err):
+    log_ai(kind, brief, False, err)
+    return jsonify(ok=False, error=err), 502
+
+
+# ------------------------------------------------------------ topic pages
+def next_topic_position(cid):
+    return db().execute("SELECT COALESCE(MAX(position),0)+1 p FROM topics WHERE chapter_id=?",
+                        (cid,)).fetchone()["p"]
 
 
 @app.route("/teacher/assistant")
 @login_required
 def assistant():
-    chapters = db().execute("SELECT number,title,standard FROM chapters"
+    """Step one of the AI flow: choose a chapter and a topic, or describe a new one."""
+    chapters = db().execute("SELECT id,number,title,strand,standard FROM chapters"
                             " ORDER BY number").fetchall()
-    return render_template("assistant.html", chapters=chapters,
-                           model=API_MODEL, kinds=list(PROMPTS))
+    pick = request.args.get("chapter", "")
+    ch = None
+    if pick.isdigit():
+        ch = db().execute("SELECT * FROM chapters WHERE number=?", (int(pick),)).fetchone()
+    return render_template("assistant.html", chapters=chapters, ch=ch,
+                           topics=topics_for(ch["id"]) if ch else [],
+                           model=API_MODEL, LEVELS=LEVELS)
 
 
-@app.route("/api/ai/generate", methods=["POST"])
+@app.route("/teacher/chapter/<int:number>/topic/new", methods=["GET", "POST"])
 @login_required
-def ai_generate():
-    data = request.get_json(silent=True) or {}
-    kind = data.get("kind", "")
-    topic = (data.get("topic") or "").strip()
-    context = (data.get("context") or "").strip()
-    count = data.get("count") or 4
-    if kind not in PROMPTS:
-        return jsonify(ok=False, error="Unknown request type."), 400
-    if not topic and not context:
-        return jsonify(ok=False, error="Describe the topic you want help with."), 400
-
-    user = "Topic: %s" % topic if topic else ""
-    if kind == "questions":
-        try:
-            count = max(1, min(12, int(count)))
-        except Exception:
-            count = 4
-        user += "\nWrite exactly %d questions, mixing the three types." % count
-    if context:
-        user += "\n\nExisting material for reference:\n%s" % context[:6000]
-
-    text, err = call_ai(PROMPTS[kind], user.strip(),
-                            max_tokens=3000 if kind == "questions" else 2000)
-    if err:
-        log_ai(kind, topic or context[:80], False, err)
-        return jsonify(ok=False, error=err), 502
-    log_ai(kind, topic or context[:80], True)
-
-    if kind == "questions":
-        try:
-            items = json.loads(strip_fences(text))
-            assert isinstance(items, list)
-        except Exception:
-            return jsonify(ok=False, error="The assistant did not return usable JSON. "
-                           "Try again, or reword the topic.", raw=text[:1500]), 502
-        clean = []
-        for it in items:
-            if not isinstance(it, dict):
-                continue
-            t = it.get("type", "mcq")
-            if t not in ("mcq", "multi", "fill"):
-                continue
-            row = dict(type=t, stem=str(it.get("stem", "")).strip(),
-                       explanation=str(it.get("explanation", "")).strip(),
-                       skill_tag=str(it.get("skill_tag", "")).strip(),
-                       difficulty=it.get("difficulty", "medium"))
-            if t == "fill":
-                acc = [str(x) for x in (it.get("accept") or []) if str(x).strip()]
-                if not acc or not row["stem"]:
-                    continue
-                row.update(options=[], answer=[], accept=acc,
-                           display_answer=str(it.get("display_answer") or acc[0]),
-                           unit=str(it.get("unit") or ""))
-            else:
-                opts = [str(x) for x in (it.get("options") or []) if str(x).strip()]
-                ans = sorted({int(i) for i in (it.get("answer") or [])
-                              if isinstance(i, int) and 0 <= i < len(opts)})
-                if len(opts) < 2 or not ans:
-                    continue
-                if t == "mcq" and len(ans) != 1:
-                    t = row["type"] = "multi"
-                keys = ["A", "B", "C", "D", "E", "F"]
-                row.update(options=opts, answer=ans, accept=[], unit="",
-                           display_answer=" and ".join(keys[i] for i in ans))
-            clean.append(row)
-        if not clean:
-            return jsonify(ok=False, error="No valid questions came back. Try again."), 502
-        return jsonify(ok=True, kind=kind, questions=clean)
-
-    return jsonify(ok=True, kind=kind, text=text)
-
-
-@app.route("/api/ai/accept", methods=["POST"])
-@login_required
-def ai_accept():
-    """Save a reviewed AI draft into the database, tagged as an AI draft."""
-    data = request.get_json(silent=True) or {}
-    number = data.get("chapter")
-    row = db().execute("SELECT * FROM chapters WHERE number=?", (number,)).fetchone()
-    if not row:
-        return jsonify(ok=False, error="Choose a chapter to add this to."), 400
-    author = current_user()["display_name"]
-
-    if data.get("questions"):
-        n = 0
-        for q in data["questions"]:
-            pos = db().execute("SELECT COALESCE(MAX(position),0)+1 p FROM questions"
-                               " WHERE chapter_id=?", (row["id"],)).fetchone()["p"]
-            db().execute(
-                "INSERT INTO questions (chapter_id,position,type,stem,options,answer,"
-                "accept,display_answer,unit,explanation,skill_tag,difficulty,source,"
-                "author,created) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'ai',?,?)",
-                (row["id"], pos, q.get("type", "mcq"), q.get("stem", ""),
-                 json.dumps(q.get("options") or []), json.dumps(q.get("answer") or []),
-                 json.dumps(q.get("accept") or []), q.get("display_answer", ""),
-                 q.get("unit", ""), q.get("explanation", ""), q.get("skill_tag", ""),
-                 q.get("difficulty", "medium"), author, now()))
-            n += 1
+def new_topic(number):
+    ch = chapter_row(number)
+    if request.method == "POST":
+        meta = topic_meta(request.form)
+        if not meta["title"]:
+            flash("A topic needs a title.", "error")
+            return redirect(request.full_path)
+        cur = db().execute(
+            "INSERT INTO topics (chapter_id,position,title,objective,success_criteria,"
+            "prior_knowledge,vocab,misconceptions,context,level,duration,notes,status,"
+            "source,author,created,updated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'draft',?,?,?,?)",
+            (ch["id"], next_topic_position(ch["id"]), meta["title"], meta["objective"],
+             json.dumps(meta["success_criteria"]), meta["prior_knowledge"],
+             json.dumps(meta["vocab"]), meta["misconceptions"], meta["context"],
+             meta["level"], meta["duration"], meta["notes"],
+             "ai" if request.form.get("via") == "ai" else "manual",
+             current_user()["display_name"], now(), now()))
         db().commit()
-        return jsonify(ok=True, added=n,
-                       redirect=url_for("questions_list", number=number))
+        flash("Topic created. It stays a draft until you publish it.", "ok")
+        step = "content&autogen=1" if request.form.get("via") == "ai" and API_KEY else "content"
+        return redirect(url_for("topic_studio", tid=cur.lastrowid) + "?step=" + step)
+    return render_template("topic_new.html", ch=ch, LEVELS=LEVELS,
+                           via=request.args.get("via", "manual"))
 
-    text = (data.get("text") or "").strip()
-    if not text:
-        return jsonify(ok=False, error="There is nothing to save."), 400
-    body = (row["body_md"] or "").rstrip() + "\n\n" + text + "\n"
-    db().execute("UPDATE chapters SET body_md=?, source=?, author=?, updated=?"
-                 " WHERE id=?",
-                 (body, "ai" if row["source"] == "curriculum" else row["source"],
-                  author, now(), row["id"]))
+
+@app.route("/teacher/topic/<int:tid>")
+@login_required
+def topic_studio(tid):
+    """The topic workspace: brief, lesson, questions, preview and publish."""
+    t = topic_row(tid)
+    ch = db().execute("SELECT * FROM chapters WHERE id=?", (t["chapter_id"],)).fetchone()
+    qs = questions_for(ch["id"], topic_id=tid)
+    step = request.args.get("step", "brief")
+    return render_template("topic_studio.html", ch=ch, t=topic_dict(t), questions=qs,
+                           LEVELS=LEVELS, model=API_MODEL,
+                           step=step if step in ("brief", "content", "questions",
+                                                 "publish") else "brief",
+                           autogen=request.args.get("autogen") == "1")
+
+
+@app.route("/api/topic/<int:tid>/save", methods=["POST"])
+@login_required
+def topic_save(tid):
+    """Save the brief and the draft lesson. Students see none of it until publish."""
+    t = topic_row(tid)
+    data = ai_json()
+    meta = topic_meta(data)
+    if not meta["title"]:
+        return jsonify(ok=False, error="A topic needs a title."), 400
+    draft = data.get("draft_md")
+    draft = t["draft_md"] if draft is None else str(draft)
+    src = t["source"]
+    if data.get("ai_used"):
+        src = "ai"
+    elif src == "curriculum" and draft != t["draft_md"]:
+        src = "manual"
+    db().execute(
+        "UPDATE topics SET title=?,objective=?,success_criteria=?,prior_knowledge=?,vocab=?,"
+        "misconceptions=?,context=?,level=?,duration=?,notes=?,draft_md=?,source=?,author=?,"
+        "updated=? WHERE id=?",
+        (meta["title"], meta["objective"], json.dumps(meta["success_criteria"]),
+         meta["prior_knowledge"], json.dumps(meta["vocab"]), meta["misconceptions"],
+         meta["context"], meta["level"], meta["duration"], meta["notes"], draft, src,
+         current_user()["display_name"], now(), tid))
     db().commit()
-    return jsonify(ok=True, redirect=url_for("chapter", number=number))
+    return jsonify(ok=True, saved=now(), source=src)
+
+
+@app.route("/teacher/topic/<int:tid>/publish", methods=["POST"])
+@login_required
+def topic_publish(tid):
+    t = topic_row(tid)
+    if not t["draft_md"].strip():
+        flash("Write the lesson before you publish it.", "error")
+        return redirect(url_for("topic_studio", tid=tid, step="publish"))
+    db().execute("UPDATE topics SET body_md=draft_md, status='published', updated=?"
+                 " WHERE id=?", (now(), tid))
+    n = 0
+    if request.form.get("with_questions"):
+        n = db().execute("UPDATE questions SET status='live' WHERE topic_id=?"
+                         " AND status='draft'", (tid,)).rowcount
+    db().commit()
+    flash("Published “%s”%s. Students can see it now." %
+          (t["title"], " and %d question%s" % (n, "" if n == 1 else "s") if n else ""), "ok")
+    return redirect(url_for("topic_studio", tid=tid, step="publish"))
+
+
+@app.route("/teacher/topic/<int:tid>/unpublish", methods=["POST"])
+@login_required
+def topic_unpublish(tid):
+    t = topic_row(tid)
+    db().execute("UPDATE topics SET status='draft', updated=? WHERE id=?", (now(), tid))
+    db().commit()
+    flash("“%s” is hidden from students again." % t["title"], "ok")
+    return redirect(url_for("topic_studio", tid=tid, step="publish"))
+
+
+@app.route("/teacher/topic/<int:tid>/delete", methods=["POST"])
+@login_required
+def topic_delete(tid):
+    t = topic_row(tid)
+    # its questions stay in the chapter, just no longer tied to a topic
+    db().execute("DELETE FROM topics WHERE id=?", (tid,))
+    db().commit()
+    flash("Deleted the topic “%s”. Its questions stay in the chapter." % t["title"], "ok")
+    return redirect(url_for("edit_chapter", number=t["chapter_number"]))
+
+
+@app.route("/teacher/topic/<int:tid>/move", methods=["POST"])
+@login_required
+def topic_move(tid):
+    t = topic_row(tid)
+    ids = [r["id"] for r in db().execute(
+        "SELECT id FROM topics WHERE chapter_id=? ORDER BY position, id",
+        (t["chapter_id"],)).fetchall()]
+    i = ids.index(tid)
+    j = i - 1 if request.form.get("dir") == "up" else i + 1
+    if 0 <= j < len(ids):
+        ids[i], ids[j] = ids[j], ids[i]
+        for pos, x in enumerate(ids, 1):
+            db().execute("UPDATE topics SET position=? WHERE id=?", (pos, x))
+        db().commit()
+    return redirect(url_for("edit_chapter", number=t["chapter_number"]) + "#topics")
+
+
+@app.route("/api/render", methods=["POST"])
+@login_required
+def api_render():
+    return jsonify(ok=True, html=render_md(str(ai_json().get("md") or "")))
+
+
+# ------------------------------------------------ question API (workspace)
+def owned_question(qid):
+    q = db().execute("SELECT * FROM questions WHERE id=?", (qid,)).fetchone()
+    if not q:
+        abort(404)
+    return q
+
+
+@app.route("/api/question/<int:qid>/save", methods=["POST"])
+@login_required
+def api_question_save(qid):
+    q = owned_question(qid)
+    data = ai_json()
+    row, err = clean_question(data.get("question") or {}, keep_visual=True)
+    if err:
+        return jsonify(ok=False, error=err), 400
+    src = "ai" if data.get("ai_used") else q["source"]
+    if src == "curriculum":
+        src = "manual"
+    db().execute(
+        "UPDATE questions SET type=?,stem=?,options=?,answer=?,accept=?,display_answer=?,"
+        "unit=?,visual=?,explanation=?,skill_tag=?,difficulty=?,source=?,author=? WHERE id=?",
+        (row["type"], row["stem"], json.dumps(row["options"]), json.dumps(row["answer"]),
+         json.dumps(row["accept"]), row["display_answer"], row["unit"], row["visual"],
+         row["explanation"], row["skill_tag"], row["difficulty"], src,
+         current_user()["display_name"], qid))
+    db().commit()
+    return jsonify(ok=True, question=question_dict(owned_question(qid)))
+
+
+@app.route("/api/question/<int:qid>/status", methods=["POST"])
+@login_required
+def api_question_status(qid):
+    owned_question(qid)
+    status = "live" if ai_json().get("status") == "live" else "draft"
+    db().execute("UPDATE questions SET status=? WHERE id=?", (status, qid))
+    db().commit()
+    return jsonify(ok=True, status=status)
+
+
+@app.route("/api/question/<int:qid>/delete", methods=["POST"])
+@login_required
+def api_question_delete(qid):
+    owned_question(qid)
+    db().execute("DELETE FROM questions WHERE id=?", (qid,))
+    db().commit()
+    return jsonify(ok=True)
+
+
+# ------------------------------------------------------------ AI endpoints
+@app.route("/api/ai/brief", methods=["POST"])
+@login_required
+def ai_brief():
+    """Suggest the lesson brief from the chapter and the title."""
+    data = ai_json()
+    ch = db().execute("SELECT * FROM chapters WHERE number=?",
+                      (data.get("chapter"),)).fetchone()
+    if not ch:
+        return jsonify(ok=False, error="Choose a chapter first."), 400
+    meta = topic_meta(data)
+    if not meta["title"]:
+        return jsonify(ok=False, error="Give the topic a title first."), 400
+    text, err = call_ai(PROMPTS["brief"], lesson_brief(ch, meta), max_tokens=4000)
+    if err:
+        return ai_fail("brief", meta["title"], err)
+    try:
+        s = extract_json(text)
+        assert isinstance(s, dict)
+    except Exception:
+        return ai_fail("brief", meta["title"], "The assistant's answer could not be read. "
+                                               "Try again.")
+    log_ai("brief", meta["title"], True)
+    vocab = [dict(term=str(v.get("term", "")).strip(), meaning=str(v.get("meaning", "")).strip())
+             for v in (s.get("vocab") or []) if isinstance(v, dict) and v.get("term")]
+    return jsonify(ok=True, brief=dict(
+        objective=str(s.get("objective") or "").strip(),
+        criteria_text="\n".join(str(x).strip() for x in (s.get("success_criteria") or [])
+                                if str(x).strip()),
+        prior_knowledge=str(s.get("prior_knowledge") or "").strip(),
+        vocab_text=vocab_text(vocab),
+        misconceptions=str(s.get("misconceptions") or "").strip(),
+        context=str(s.get("context") or "").strip()))
+
+
+@app.route("/api/ai/topic/<int:tid>/lesson", methods=["POST"])
+@login_required
+def ai_lesson(tid):
+    """Write the lesson from the brief on screen. Nothing is saved here: the
+    draft goes into the editor, and the teacher saves it."""
+    t = topic_row(tid)
+    ch = db().execute("SELECT * FROM chapters WHERE id=?", (t["chapter_id"],)).fetchone()
+    meta = topic_meta(ai_json())
+    if not meta["title"]:
+        return jsonify(ok=False, error="Give the topic a title first."), 400
+    text, err = call_ai(PROMPTS["lesson"], lesson_brief(ch, meta))
+    if err:
+        return ai_fail("lesson", meta["title"], err)
+    log_ai("lesson", meta["title"], True)
+    return jsonify(ok=True, text=text)
+
+
+@app.route("/api/ai/topic/<int:tid>/questions", methods=["POST"])
+@login_required
+def ai_questions(tid):
+    """Write questions from the brief and the lesson, and store them as drafts
+    on this topic, where the teacher can check, edit and refine each one."""
+    t = topic_row(tid)
+    ch = db().execute("SELECT * FROM chapters WHERE id=?", (t["chapter_id"],)).fetchone()
+    data = ai_json()
+    meta = topic_meta(data)
+    try:
+        count = max(1, min(12, int(data.get("count") or 5)))
+    except (TypeError, ValueError):
+        count = 5
+    types = [x for x in (data.get("types") or []) if x in TYPE_LABELS] or list(TYPE_LABELS)
+    diff = data.get("difficulty") if data.get("difficulty") in ("easy", "medium", "hard") \
+        else "mixed"
+    user = lesson_brief(ch, meta)
+    lesson = str(data.get("draft_md") or t["draft_md"] or "").strip()
+    if lesson:
+        user += "\n\nLESSON TEXT\n" + lesson[:8000]
+    others = [q["stem"] for q in questions_for(ch["id"], topic_id=tid)]
+    if others:
+        user += "\n\nThese questions already exist; do not repeat them:\n" + \
+                "\n".join("- " + s for s in others[:30])
+    user += ("\n\nWrite exactly %d questions. Use only these types: %s. Difficulty: %s."
+             % (count, ", ".join(types),
+                "a mix of easy, medium and hard" if diff == "mixed" else diff))
+    if data.get("instruction"):
+        user += "\nThe teacher also asks: %s" % str(data["instruction"])[:500]
+    text, err = call_ai(PROMPTS["questions"], user)
+    if err:
+        return ai_fail("questions", meta["title"], err)
+    try:
+        items = extract_json(text)
+        if isinstance(items, dict):
+            items = items.get("questions") or []
+        assert isinstance(items, list)
+    except Exception:
+        return ai_fail("questions", meta["title"],
+                       "The assistant's answer could not be read. Try again.")
+    author = current_user()["display_name"]
+    added = []
+    for it in items:
+        row, bad = clean_question(it)
+        if bad:
+            continue
+        # an mcq with two right answers comes back as multi; allow it if mcq was asked for
+        if row["type"] not in types and not (row["type"] == "multi" and "mcq" in types):
+            continue
+        pos = db().execute("SELECT COALESCE(MAX(position),0)+1 p FROM questions"
+                           " WHERE chapter_id=?", (ch["id"],)).fetchone()["p"]
+        cur = db().execute(
+            "INSERT INTO questions (chapter_id,topic_id,status,position,type,stem,options,"
+            "answer,accept,display_answer,unit,explanation,skill_tag,difficulty,source,"
+            "author,created) VALUES (?,?,'draft',?,?,?,?,?,?,?,?,?,?,?,'ai',?,?)",
+            (ch["id"], tid, pos, row["type"], row["stem"], json.dumps(row["options"]),
+             json.dumps(row["answer"]), json.dumps(row["accept"]), row["display_answer"],
+             row["unit"], row["explanation"], row["skill_tag"], row["difficulty"],
+             author, now()))
+        added.append(cur.lastrowid)
+    db().commit()
+    if not added:
+        return ai_fail("questions", meta["title"], "No usable questions came back. Try again.")
+    log_ai("questions", "%d for %s" % (len(added), meta["title"]), True)
+    rows = [question_dict(owned_question(i)) for i in added]
+    return jsonify(ok=True, questions=rows)
+
+
+@app.route("/api/ai/refine", methods=["POST"])
+@login_required
+def ai_refine():
+    """Rework any piece of text by the teacher's instruction: a lesson, a chapter
+    introduction, a list of goals. Returns the proposal; nothing is saved."""
+    data = ai_json()
+    text = str(data.get("text") or "")
+    instruction = str(data.get("instruction") or "").strip()
+    if not instruction:
+        return jsonify(ok=False, error="Say how you want it changed."), 400
+    what = str(data.get("what") or "text")[:120]
+    ch = db().execute("SELECT * FROM chapters WHERE number=?",
+                      (data.get("chapter"),)).fetchone()
+    background = ""
+    if ch and data.get("topic"):
+        background = lesson_brief(ch, topic_meta(data["topic"]))
+    elif ch:
+        background = chapter_brief(ch)
+    # The text goes last and fenced in tags, so the model cannot mistake the
+    # background for the thing it is meant to rewrite.
+    user = ("<background>\n%s\n</background>\n\n<what>%s</what>\n\n"
+            "<instruction>%s</instruction>\n\n<text>\n%s\n</text>\n\n"
+            "Return the revised version of the text between <text> and </text> only, "
+            "without the tags." % (background or "(none)", what, instruction[:1000],
+                                   text[:12000] if text.strip() else "(empty)"))
+    out, err = call_ai(PROMPTS["refine"], user)
+    if err:
+        return ai_fail("refine", "%s: %s" % (what, instruction), err)
+    log_ai("refine", "%s: %s" % (what, instruction), True)
+    out = re.sub(r"^\s*<text>\s*|\s*</text>\s*$", "", out.strip())
+    out = re.sub(r"^```(?:markdown|md)?\s*\n(.*)\n```\s*$", r"\1", out.strip(), flags=re.S)
+    return jsonify(ok=True, text=out)
+
+
+@app.route("/api/ai/refine-question", methods=["POST"])
+@login_required
+def ai_refine_question():
+    """Rework one question by the teacher's instruction. Returns the proposal."""
+    data = ai_json()
+    instruction = str(data.get("instruction") or "").strip()
+    if not instruction:
+        return jsonify(ok=False, error="Say how you want it changed."), 400
+    q = data.get("question") or {}
+    parts = []
+    ch = db().execute("SELECT * FROM chapters WHERE number=?",
+                      (data.get("chapter"),)).fetchone()
+    if ch:
+        tid = data.get("topic_id")
+        t = db().execute("SELECT * FROM topics WHERE id=? AND chapter_id=?",
+                         (tid, ch["id"])).fetchone() if tid else None
+        # topic_dict carries the lists as text too, which is what topic_meta reads
+        parts.append(lesson_brief(ch, topic_meta(topic_dict(t))) if t else chapter_brief(ch))
+    shown = {k: q.get(k) for k in ("type", "stem", "options", "answer", "accept",
+                                   "display_answer", "unit", "explanation", "skill_tag",
+                                   "difficulty")}
+    parts.append("QUESTION:\n" + json.dumps(shown, ensure_ascii=False))
+    parts.append("TEACHER'S INSTRUCTION: %s" % instruction[:1000])
+    text, err = call_ai(PROMPTS["refine_question"], "\n\n".join(parts))
+    if err:
+        return ai_fail("refine", "question: %s" % instruction, err)
+    try:
+        s = extract_json(text)
+        if isinstance(s, dict) and isinstance(s.get("question"), dict):
+            s = s["question"]
+        row, bad = clean_question(s)
+        if bad:
+            raise ValueError(bad)
+    except Exception:
+        return ai_fail("refine", "question: %s" % instruction,
+                       "The assistant's answer could not be read. Try again.")
+    row["visual"] = str(q.get("visual") or "")
+    log_ai("refine", "question: %s" % instruction, True)
+    return jsonify(ok=True, question=row)
 
 
 @app.errorhandler(404)

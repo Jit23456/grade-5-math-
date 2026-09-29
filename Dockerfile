@@ -11,5 +11,7 @@ EXPOSE 8000
 # PORT and WEB_CONCURRENCY are read at start-up: a host that assigns its own port
 # (Render, Fly, Cloud Run, Koyeb) is followed without editing this file, and a small
 # free instance can be held to fewer workers. `exec` keeps gunicorn as PID 1 so it
-# still receives stop signals.
-CMD ["sh", "-c", "exec gunicorn -w ${WEB_CONCURRENCY:-2} -b 0.0.0.0:${PORT:-8000} --access-logfile - wsgi:application"]
+# still receives stop signals. An AI request can take most of a minute, so each
+# worker runs a few threads (one slow request does not hold up the site) and the
+# timeout is well above gunicorn's default of 30 seconds.
+CMD ["sh", "-c", "exec gunicorn -w ${WEB_CONCURRENCY:-2} --threads 4 --timeout 180 -b 0.0.0.0:${PORT:-8000} --access-logfile - wsgi:application"]

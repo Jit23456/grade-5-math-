@@ -4,185 +4,71 @@
 <main><div class="wrap">
   <p class="eyebrow">Teacher area</p>
   <h2 class="sec">AI assistant</h2>
-  <p class="intro">Describe what you need and the assistant drafts it. Nothing is saved until
-  you read it and press save, and anything you save is labelled as an AI draft so readers know
-  where it came from.</p>
+  <p class="intro">Build a lesson and its assessment one step at a time. You describe the
+  topic first, and the assistant writes from that description. At every step you can preview
+  the draft, edit it by hand, or ask the assistant to refine it. Students see nothing until
+  you publish.</p>
+
+  <ol class="steps">
+    <li class="{{ 'done' if ch else 'on' }}">Chapter</li><li>Topic brief</li><li>Lesson</li><li>Assessment</li><li>Publish</li>
+  </ol>
 
   {% if not ai_ready %}
   <div class="warnbox"><b>The assistant is switched off</b>
   No API key is set on the server, so nothing can be generated. Set the
-  <code>GROQ_API_KEY</code> environment variable and restart. You can still write
-  chapters and questions by hand from the <a href="{{ url_for('dashboard') }}">dashboard</a>.</div>
+  <code>GROQ_API_KEY</code> environment variable and restart. You can still build topics and
+  questions by hand: the same steps work without the assistant.</div>
   {% else %}
-  <div class="warnbox"><b>Check the mathematics before you save</b>
+  <div class="warnbox"><b>Check the mathematics before you publish</b>
   Language models get arithmetic wrong sometimes. Work through every calculation and every
   answer key yourself before you put a draft in front of a class.</div>
   {% endif %}
 
-  <div class="asst">
-    <div class="panel">
-      <h3>What do you need?</h3>
+  <form class="card" method="get" style="max-width:640px;margin-bottom:26px">
+    <div class="field" style="margin-bottom:0"><label for="chapter">1. Which chapter is this for?</label>
+      <select id="chapter" name="chapter" onchange="this.form.submit()">
+        <option value="">Choose a chapter</option>
+        {% for c in chapters %}
+        <option value="{{ c.number }}" {% if ch and ch.number == c.number %}selected{% endif %}>{{ c.number }}. {{ c.title }}</option>
+        {% endfor %}
+      </select></div>
+    <noscript><button class="btn blue sm" type="submit" style="margin-top:12px">Choose</button></noscript>
+  </form>
 
-      <div class="field"><label for="kind">Type of help</label>
-        <select id="kind">
-          <option value="lesson">A lesson, with a worked example</option>
-          <option value="questions">Assessment questions</option>
-          <option value="explain">An explanation to read aloud</option>
-          <option value="vocab">Key vocabulary for a topic</option>
-          <option value="rewrite">Rewrite text in simpler language</option>
-        </select></div>
+  {% if ch %}
+  <div class="panel">
+    <h3>2. Pick a topic in chapter {{ ch.number }}, or start a new one</h3>
+    <p style="margin:0 0 16px;color:var(--ink-2);font-size:15px">
+      {% if ch.standard %}<b>Standard:</b> {{ ch.standard }}{% endif %}</p>
 
-      <div class="field"><label for="topic">Topic</label>
-        <p class="hint">Be specific. "Rounding decimals to the nearest tenth" beats "decimals".</p>
-        <input id="topic" type="text" placeholder="e.g. adding decimals to thousandths">
-      </div>
+    <p><a class="btn blue" href="{{ url_for('new_topic', number=ch.number, via='ai') }}">+ New topic with AI</a></p>
 
-      <div class="field" id="countfield" style="display:none">
-        <label for="count">How many questions?</label>
-        <input id="count" type="number" min="1" max="12" value="4">
-      </div>
-
-      <div class="field"><label for="context">Existing material (optional)</label>
-        <p class="hint">Paste text for the assistant to work from. Required for a rewrite.</p>
-        <textarea id="context" rows="6" placeholder="Paste a lesson, a question, or your own notes"></textarea>
-      </div>
-
-      <div class="field"><label for="chapter">Save into which chapter?</label>
-        <select id="chapter">
-          <option value="">Choose a chapter</option>
-          {% for c in chapters %}
-          <option value="{{ c.number }}">{{ c.number }}. {{ c.title }}</option>
-          {% endfor %}
-        </select></div>
-
-      <button class="btn blue" id="go" {% if not ai_ready %}disabled{% endif %}>Generate a draft</button>
-      <p style="font-family:var(--mono);font-size:10.5px;color:var(--ink-2);margin:14px 0 0">
-        MODEL: {{ model }}</p>
-    </div>
-
-    <div class="panel">
-      <h3>Draft <span id="status" style="font-family:var(--mono);font-size:11px;color:var(--ink-2);font-weight:400"></span></h3>
-      <div id="out"><p class="empty">Your draft will appear here. Read it, check the
-        mathematics, then save it into a chapter or copy it into the editor yourself.</p></div>
-      <div id="saverow" style="display:none;margin-top:18px">
-        <button class="btn blue" id="save">Save into the chosen chapter</button>
-        <button class="btn light" id="copy">Copy to clipboard</button>
-        <button class="btn light" id="discard">Discard</button>
-      </div>
-    </div>
+    {% if topics %}
+    <table class="data" style="margin-top:14px">
+      <tr><th style="width:40px" class="c">#</th><th>Topic</th><th style="width:130px">Status</th>
+          <th style="width:110px">Origin</th><th style="width:260px">Continue with</th></tr>
+      {% for t in topics %}
+      <tr>
+        <td class="c">{{ loop.index }}</td>
+        <td>{{ t.title }}
+          {% if not t.objective %}<div class="muted">No brief yet: add one for better drafts</div>{% endif %}</td>
+        <td>{% if t.status == 'published' %}<span class="badge manual">published</span>{% if t.dirty %} <span class="badge draft">edits</span>{% endif %}
+            {% else %}<span class="badge draft">draft</span>{% endif %}</td>
+        <td><span class="badge {{ t.source }}">{{ SOURCES[t.source][0] if t.source in SOURCES else t.source }}</span></td>
+        <td>
+          <a class="btn light sm" href="{{ url_for('topic_studio', tid=t.id, step='brief') }}">Brief</a>
+          <a class="btn light sm" href="{{ url_for('topic_studio', tid=t.id, step='content') }}">Lesson</a>
+          <a class="btn light sm" href="{{ url_for('topic_studio', tid=t.id, step='questions') }}">Questions</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <p class="muted">This chapter has no topics yet.</p>
+    {% endif %}
   </div>
+  {% endif %}
+
+  <p style="font-family:var(--mono);font-size:10.5px;color:var(--ink-2);margin:18px 0 0">MODEL: {{ model }}</p>
 </div></main>
-{% endblock %}
-
-{% block scripts %}
-<script>
-const KEYS = ['A','B','C','D','E','F'];
-const $ = id => document.getElementById(id);
-let draft = null;   // {kind, text} or {kind:'questions', questions:[...]}
-
-function esc(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-$('kind').addEventListener('change', () => {
-  $('countfield').style.display = $('kind').value === 'questions' ? 'block' : 'none';
-});
-
-function renderQuestions(items) {
-  const TYPE = {mcq:'Multiple choice', multi:'Multi-select', fill:'Fill in the blank'};
-  return items.map((q, n) => {
-    let body = '';
-    if (q.type === 'fill') {
-      body = '<div class="optline ok">Accepted: ' + q.accept.map(esc).join(' &nbsp;|&nbsp; ') + '</div>';
-    } else {
-      body = q.options.map((o, i) =>
-        '<div class="optline' + (q.answer.includes(i) ? ' ok' : '') + '">' +
-        KEYS[i] + '. ' + esc(o) + (q.answer.includes(i) ? ' &check;' : '') + '</div>').join('');
-    }
-    return '<div class="draft"><div class="dh"><b>Question ' + (n+1) + '</b>' +
-      '<span>' + TYPE[q.type] + ' &middot; ' + esc(q.difficulty) +
-      (q.skill_tag ? ' &middot; ' + esc(q.skill_tag) : '') + '</span></div>' +
-      '<p style="margin:0 0 9px">' + esc(q.stem) + '</p>' + body +
-      '<p style="font-size:14.5px;color:var(--ink-2);margin:9px 0 0"><em>' +
-      esc(q.explanation) + '</em></p></div>';
-  }).join('');
-}
-
-$('go').addEventListener('click', async () => {
-  const kind = $('kind').value;
-  const topic = $('topic').value.trim();
-  const context = $('context').value.trim();
-  if (!topic && !context) {
-    $('out').innerHTML = '<p class="empty">Describe a topic first, or paste some material.</p>';
-    return;
-  }
-  $('go').disabled = true;
-  $('status').innerHTML = '<span class="spinner"></span>working, this can take a few seconds';
-  $('out').innerHTML = '<p class="empty">Generating&hellip;</p>';
-  $('saverow').style.display = 'none';
-  draft = null;
-  try {
-    const r = await fetch('{{ url_for("ai_generate") }}', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({kind, topic, context, count: +$('count').value || 4})
-    });
-    const d = await r.json();
-    if (!d.ok) {
-      $('out').innerHTML = '<div class="draft" style="border-left-color:var(--red)">' +
-        '<b>That did not work.</b><p style="margin:7px 0 0">' + esc(d.error) + '</p>' +
-        (d.raw ? '<pre style="margin-top:10px">' + esc(d.raw) + '</pre>' : '') + '</div>';
-    } else if (d.kind === 'questions') {
-      draft = d;
-      $('out').innerHTML = renderQuestions(d.questions);
-      $('saverow').style.display = 'block';
-    } else {
-      draft = d;
-      $('out').innerHTML = '<div class="draft"><div class="dh"><b>Draft</b>' +
-        '<span>check the mathematics before saving</span></div><pre>' + esc(d.text) + '</pre></div>';
-      $('saverow').style.display = 'block';
-    }
-  } catch (e) {
-    $('out').innerHTML = '<div class="draft" style="border-left-color:var(--red)">' +
-      '<b>The request failed.</b><p style="margin:7px 0 0">' + esc(e.message) + '</p></div>';
-  }
-  $('go').disabled = false;
-  $('status').textContent = '';
-});
-
-$('save').addEventListener('click', async () => {
-  if (!draft) return;
-  const chapter = $('chapter').value;
-  if (!chapter) { alert('Choose a chapter to save this into.'); return; }
-  const payload = {chapter: +chapter};
-  if (draft.kind === 'questions') payload.questions = draft.questions;
-  else payload.text = draft.text;
-  $('save').disabled = true;
-  try {
-    const r = await fetch('{{ url_for("ai_accept") }}', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(payload)
-    });
-    const d = await r.json();
-    if (d.ok) window.location = d.redirect;
-    else { alert(d.error || 'Saving failed.'); $('save').disabled = false; }
-  } catch (e) { alert('Saving failed: ' + e.message); $('save').disabled = false; }
-});
-
-$('copy').addEventListener('click', async () => {
-  if (!draft) return;
-  const t = draft.kind === 'questions'
-    ? JSON.stringify(draft.questions, null, 2) : draft.text;
-  try { await navigator.clipboard.writeText(t); $('copy').textContent = 'Copied'; 
-        setTimeout(() => $('copy').textContent = 'Copy to clipboard', 1600); }
-  catch (e) { alert('Could not copy automatically. Select the text and copy it.'); }
-});
-
-$('discard').addEventListener('click', () => {
-  draft = null;
-  $('out').innerHTML = '<p class="empty">Discarded. Describe something else to try again.</p>';
-  $('saverow').style.display = 'none';
-});
-</script>
 {% endblock %}

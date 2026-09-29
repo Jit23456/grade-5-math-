@@ -4,9 +4,26 @@
 <main><div class="wrap narrow">
   <p class="eyebrow">Chapter {{ ch.number }} &middot; {{ ch.title }}</p>
   <h2 class="sec">{{ 'Edit question' if q else 'Add a question' }}</h2>
-  <p class="intro">Pick a type, write the stem, then mark the correct answer.</p>
+  <p class="intro">Pick a type, write the stem, then mark the correct answer.
+    {% if ai_ready %}The assistant can refine what you have written: use the panel at the bottom.{% endif %}</p>
 
   <form class="card" method="post" id="qform">
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="row">
+      <div class="field"><label for="topic_id">Topic</label>
+        <select id="topic_id" name="topic_id">
+          <option value="">The whole chapter</option>
+          {% set cur = q.topic_id if q else topic_pick %}
+          {% for t in topics %}
+          <option value="{{ t.id }}" {% if cur == t.id %}selected{% endif %}>{{ ch.number }}.{{ loop.index }} {{ t.title }}</option>
+          {% endfor %}
+        </select></div>
+      <div class="field"><label for="status">Status</label>
+        <select id="status" name="status">
+          <option value="live" {% if not q or q.status == 'live' %}selected{% endif %}>Live: students see it</option>
+          <option value="draft" {% if q and q.status == 'draft' %}selected{% endif %}>Draft: hidden from students</option>
+        </select></div>
+    </div>
     <div class="row">
       <div class="field"><label for="type">Question type</label>
         <select id="type" name="type">
@@ -23,7 +40,7 @@
     </div>
 
     <div class="field"><label for="stem">Question</label>
-      <textarea id="stem" name="stem" rows="3" required>{{ q.stem if q else (prefill.stem if prefill else '') }}</textarea></div>
+      <textarea id="stem" name="stem" rows="3" required>{{ q.stem if q else '' }}</textarea></div>
 
     <div id="choicebox">
       <div class="field"><label for="options">Options</label>
@@ -76,12 +93,37 @@
     {% endif %}
 
     <button class="btn blue" type="submit">{{ 'Save question' if q else 'Add question' }}</button>
-    <a class="btn light" href="{{ url_for('questions_list', number=ch.number) }}">Cancel</a>
+    <a class="btn light" href="{{ next }}">Cancel</a>
   </form>
+
+  {% if ai_ready %}
+  <div class="panel" style="margin-top:22px" id="qrefine">
+    <h3>&#10022; Refine with AI</h3>
+    <p class="muted" style="margin-top:-6px">Works on what is in the form now, saved or not. The
+      suggestion is shown first; nothing changes until you press Use this, and nothing is saved
+      until you save the question.</p>
+    <div class="chips">
+      {% for c in ['Make it easier', 'Make it harder', 'Clearer wording', 'Better wrong answers',
+                   'Fuller explanation', 'Check the answer key', 'Turn it into a word problem'] %}
+      <button type="button" class="chip">{{ c }}</button>
+      {% endfor %}
+    </div>
+    <div class="refine-ask"><input type="text" id="rask" placeholder="Or say what to change">
+      <button type="button" class="btn blue sm" id="rgo">Refine</button></div>
+    <div class="refine-out" id="rout" hidden>
+      <div class="dh"><b>Suggested version</b><span>use it or discard it</span></div>
+      <div id="rprop"></div>
+      <div class="refine-actions"><button type="button" class="btn blue sm" id="ruse">Use this</button>
+        <button type="button" class="btn light sm" id="rdrop">Discard</button></div>
+    </div>
+    <p class="refine-err" id="rerr" hidden></p>
+  </div>
+  {% endif %}
 </div></main>
 {% endblock %}
 
 {% block scripts %}
+{% if ai_ready %}<script src="{{ url_for('static', filename='ai.js') }}"></script>{% endif %}
 <script>
 const sel = document.getElementById('type');
 function sync() {
@@ -100,5 +142,67 @@ function onlyOne(e) {
 }
 sel.addEventListener('change', sync);
 sync();
+
+{% if ai_ready %}
+const $ = id => document.getElementById(id);
+const form = $('qform'), KEYS = ['A','B','C','D','E','F'];
+const lines = s => s.split('\n').map(x => x.trim()).filter(Boolean);
+let proposal = null, before = null;
+
+function fromForm() {
+  const el = form.elements;
+  return {type: el.type.value, difficulty: el.difficulty.value, stem: el.stem.value,
+    options: lines(el.options.value),
+    answer: [...form.querySelectorAll('#correctbox input:checked')].map(i => +i.value),
+    accept: lines(el.accept.value), display_answer: el.display_answer.value, unit: el.unit.value,
+    explanation: el.explanation.value, skill_tag: el.skill_tag.value, visual: el.visual.value};
+}
+function toForm(q) {
+  const el = form.elements;
+  el.type.value = q.type; el.difficulty.value = q.difficulty; el.stem.value = q.stem;
+  el.options.value = q.options.join('\n');
+  form.querySelectorAll('#correctbox input').forEach(b => b.checked = q.answer.includes(+b.value));
+  el.accept.value = q.accept.join('\n');
+  el.display_answer.value = q.type === 'fill' ? q.display_answer : '';
+  el.unit.value = q.unit || ''; el.explanation.value = q.explanation; el.skill_tag.value = q.skill_tag;
+  sync();
+}
+function show(q) {
+  const body = q.type === 'fill'
+    ? '<div class="optline ok">Accepted: ' + q.accept.map(AI.esc).join(' | ') + '</div>'
+    : q.options.map((o, i) => '<div class="optline' + (q.answer.includes(i) ? ' ok' : '') + '">' +
+        KEYS[i] + '. ' + AI.esc(o) + (q.answer.includes(i) ? ' &check;' : '') + '</div>').join('');
+  return '<p class="qc-stem">' + AI.esc(q.stem) + '</p>' + body +
+         (q.explanation ? '<p class="qc-why">' + AI.esc(q.explanation) + '</p>' : '');
+}
+async function run(instruction) {
+  if (!instruction) { $('rask').focus(); return; }
+  const cur = fromForm();
+  if (!cur.stem.trim()) { $('rerr').textContent = 'Write at least the question first.'; $('rerr').className = 'refine-err bad'; $('rerr').hidden = false; return; }
+  $('rerr').hidden = true; $('rout').hidden = true;
+  AI.busy($('rgo'), true, 'Refining');
+  const d = await AI.post('{{ url_for("ai_refine_question") }}', {question: cur, instruction,
+    chapter: {{ ch.number }}, topic_id: +form.elements.topic_id.value || null});
+  AI.busy($('rgo'), false);
+  if (!d.ok) { $('rerr').textContent = d.error; $('rerr').className = 'refine-err bad'; $('rerr').hidden = false; return; }
+  proposal = d.question;
+  $('rprop').innerHTML = show(proposal);
+  $('rout').hidden = false;
+}
+document.querySelectorAll('#qrefine .chip').forEach(c =>
+  c.addEventListener('click', () => { $('rask').value = c.textContent; run(c.textContent); }));
+$('rgo').addEventListener('click', () => run($('rask').value.trim()));
+$('rask').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); run($('rask').value.trim()); } });
+$('rdrop').addEventListener('click', () => { $('rout').hidden = true; });
+$('ruse').addEventListener('click', () => {
+  before = fromForm();
+  toForm(proposal);
+  $('rout').hidden = true;
+  $('rerr').innerHTML = 'The form now holds the suggestion. Save the question to keep it. <button type="button" class="linkbtn" id="rundo">Undo</button>';
+  $('rerr').className = 'refine-err'; $('rerr').hidden = false;
+  $('rundo').addEventListener('click', () => { toForm(before); $('rerr').hidden = true; });
+  form.scrollIntoView({behavior: 'smooth'});
+});
+{% endif %}
 </script>
 {% endblock %}

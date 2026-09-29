@@ -15,4 +15,5 @@ if [ -z "${GROQ_API_KEY:-}" ]; then
   echo "note: GROQ_API_KEY is not set, so the AI assistant will be switched off."
 fi
 
-exec gunicorn -w "$WORKERS" -b "0.0.0.0:$PORT" --access-logfile - wsgi:application
+# AI requests can run close to a minute, well past gunicorn's 30-second default.
+exec gunicorn -w "$WORKERS" --threads 4 --timeout 180 -b "0.0.0.0:$PORT" --access-logfile - wsgi:application

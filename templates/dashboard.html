@@ -25,14 +25,15 @@
     </div>
     <div class="panel"><h3 style="margin:0 0 8px">Quick actions</h3>
       <p style="margin:0 0 9px"><a class="btn blue sm" href="{{ url_for('edit_chapter') }}">Write a chapter</a></p>
-      <p style="margin:0"><a class="btn sm" href="{{ url_for('assistant') }}">Open the AI assistant</a></p>
+      <p style="margin:0"><a class="btn sm" href="{{ url_for('assistant') }}">Build a topic with the AI assistant</a></p>
     </div>
   </div>
 
   <div class="strandhead">All chapters</div>
   <table class="data">
     <tr><th style="width:44px">Ch</th><th>Title</th><th style="width:150px">Strand</th>
-        <th style="width:120px">Origin</th><th class="c" style="width:60px">Qs</th>
+        <th style="width:120px">Origin</th><th class="c" style="width:60px">Topics</th>
+        <th class="c" style="width:50px">Qs</th><th class="c" style="width:60px">Drafts</th>
         <th style="width:200px">Actions</th></tr>
     {% for c in chapters %}
     <tr>
@@ -41,7 +42,9 @@
         {% if not c.published %}<span class="badge draft">draft</span>{% endif %}</td>
       <td>{{ c.strand }}</td>
       <td><span class="badge {{ c.source }}">{{ SOURCES[c.source][0] if c.source in SOURCES else c.source }}</span></td>
+      <td class="c">{{ c.lessons }}</td>
       <td class="c">{{ c.nq }}</td>
+      <td class="c">{% if c.drafts %}<a href="{{ url_for('chapter', number=c.number, preview=1) }}" title="Topics or questions not yet published">{{ c.drafts }}</a>{% else %}&ndash;{% endif %}</td>
       <td>
         <a class="btn light sm" href="{{ url_for('edit_chapter', number=c.number) }}">Edit</a>
         <a class="btn light sm" href="{{ url_for('questions_list', number=c.number) }}">Questions</a>

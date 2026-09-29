@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ 'Edit' if c else 'New' }} chapter &middot; {{ course }}{% endblock %}
+{% macro aibtn(field, what) %}{% if ai_ready %}<button type="button" class="aibtn" data-refine="{{ field }}" data-what="{{ what }}">&#10022; Refine with AI</button>{% endif %}{% endmacro %}
 {% block body %}
 <main><div class="wrap narrow">
   <p class="eyebrow">Teacher area</p>
@@ -7,7 +8,17 @@
   <p class="intro">{% if c and c.source == 'curriculum' %}This chapter came from the BC
     curriculum. Saving your edits relabels it as teacher written, so readers can see it
     has been changed.{% else %}Fill in as much or as little as you like. Only the number
-    and title are required.{% endif %}</p>
+    and title are required.{% endif %}
+    {% if c %}The lessons are the topics listed below the form, each with its own page.{% endif %}</p>
+
+  {% if c %}
+  <p style="margin:-10px 0 24px">
+    <a class="btn light sm" href="{{ url_for('chapter', number=c.number) }}">View chapter</a>
+    <a class="btn light sm" href="{{ url_for('chapter', number=c.number, preview=1) }}">Preview with drafts</a>
+    <a class="btn light sm" href="#topics">Topics ({{ topics|length }})</a>
+    <a class="btn light sm" href="{{ url_for('questions_list', number=c.number) }}">Assessment questions</a>
+  </p>
+  {% endif %}
 
   <form class="card" method="post">
     <div class="row">
@@ -23,12 +34,12 @@
     </div>
 
     <div class="field"><label for="title">Title</label>
-      <input id="title" type="text" name="title" required
-             value="{{ c.title if c else (prefill.title if prefill else '') }}"></div>
+      <input id="title" type="text" name="title" required value="{{ c.title if c else '' }}"></div>
 
     <div class="field"><label for="lede">One-line summary</label>
       <p class="hint">Shown on the chapter card and under the title.</p>
-      <input id="lede" type="text" name="lede" value="{{ c.lede if c else '' }}"></div>
+      <input id="lede" type="text" name="lede" value="{{ c.lede if c else '' }}">
+      {{ aibtn('lede', 'One-line chapter summary shown under the title') }}</div>
 
     <div class="field"><label for="standard">BC content standard</label>
       <p class="hint">The exact wording from the curriculum page, if this chapter maps to one.</p>
@@ -43,16 +54,18 @@
 
     <div class="field"><label for="goals">Learning goals</label>
       <p class="hint">One per line. Numbered automatically.</p>
-      <textarea id="goals" name="goals" rows="5">{{ c.goals|join('\n') if c else '' }}</textarea></div>
+      <textarea id="goals" name="goals" rows="5">{{ c.goals|join('\n') if c else '' }}</textarea>
+      {{ aibtn('goals', 'Chapter learning goals, one per line') }}</div>
 
     <div class="field"><label for="vocab">Key vocabulary</label>
       <p class="hint">One per line, in the form <code>Term | meaning</code>.</p>
-      <textarea id="vocab" name="vocab" rows="5">{{ c.vocab_text if c else '' }}</textarea></div>
+      <textarea id="vocab" name="vocab" rows="5">{{ c.vocab_text if c else '' }}</textarea>
+      {{ aibtn('vocab', 'Chapter vocabulary, one "Term | meaning" per line') }}</div>
 
-    <div class="field"><label for="body_md">Lessons (Markdown)</label>
-      <p class="hint">Start each lesson with <code>### Lesson 1.1 - Title</code>. Tables, fenced
-      code blocks and <code>&gt; **Watch out.**</code> blockquotes all render. Paste an AI draft here if you have one.</p>
-      <textarea id="body_md" name="body_md" rows="22">{{ c.body_md if c else (prefill.body if prefill else '') }}</textarea></div>
+    <div class="field"><label for="body_md">Chapter introduction (Markdown, optional)</label>
+      <p class="hint">Shown before the first lesson. The lessons themselves are the topics below.</p>
+      <textarea id="body_md" name="body_md" rows="8">{{ c.body_md if c else '' }}</textarea>
+      {{ aibtn('body_md', 'Chapter introduction shown before the first lesson (Markdown)') }}</div>
 
     <div class="field"><label for="visual">Hero diagram (optional)</label>
       <p class="hint">Raw SVG markup, shown at the top of the chapter. Leave blank for no diagram.</p>
@@ -60,7 +73,8 @@
 
     <div class="field"><label for="summary">Chapter summary points</label>
       <p class="hint">One per line.</p>
-      <textarea id="summary" name="summary" rows="5">{{ c.summary|join('\n') if c else '' }}</textarea></div>
+      <textarea id="summary" name="summary" rows="5">{{ c.summary|join('\n') if c else '' }}</textarea>
+      {{ aibtn('summary', 'Chapter summary points, one per line') }}</div>
 
     {% if not c %}
     <div class="field"><label for="source">How was this written?</label>
@@ -81,10 +95,58 @@
   </form>
 
   {% if c %}
-  <form method="post" action="{{ url_for('delete_chapter', number=c.number) }}" style="margin-top:22px"
-        onsubmit="return confirm('Delete chapter {{ c.number }} and all its questions? This cannot be undone.')">
+  <div class="strandhead" id="topics" style="margin-top:40px">Topics in this chapter</div>
+  <p class="intro">Each topic is one lesson. Open a topic to edit its brief, lesson and
+    questions, preview it, refine it with AI, and publish it.</p>
+  {% if topics %}
+  <table class="data">
+    <tr><th class="c" style="width:40px">#</th><th>Topic</th><th style="width:130px">Status</th>
+        <th class="c" style="width:50px">Qs</th><th style="width:230px"></th></tr>
+    {% for t in topics %}
+    <tr>
+      <td class="c">{{ c.number }}.{{ loop.index }}</td>
+      <td><a href="{{ url_for('topic_studio', tid=t.id) }}">{{ t.title }}</a>
+        <div class="muted">{{ LEVELS[t.level][0] if t.level in LEVELS else t.level }} &middot; {{ t.duration }} min
+          {% if not t.objective %}&middot; no brief yet{% endif %}</div></td>
+      <td>{% if t.status == 'published' %}<span class="badge manual">published</span>{% if t.dirty %} <span class="badge draft">edits</span>{% endif %}
+          {% else %}<span class="badge draft">draft</span>{% endif %}</td>
+      <td class="c">{{ t.nq }}</td>
+      <td>
+        <a class="btn light sm" href="{{ url_for('topic_studio', tid=t.id) }}">Open</a>
+        <form method="post" action="{{ url_for('topic_move', tid=t.id) }}" style="display:inline">
+          <input type="hidden" name="dir" value="up">
+          <button class="btn light sm" type="submit" {% if loop.first %}disabled{% endif %} aria-label="Move up">&uarr;</button></form>
+        <form method="post" action="{{ url_for('topic_move', tid=t.id) }}" style="display:inline">
+          <input type="hidden" name="dir" value="down">
+          <button class="btn light sm" type="submit" {% if loop.last %}disabled{% endif %} aria-label="Move down">&darr;</button></form>
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">No topics yet.</p>
+  {% endif %}
+  <p style="margin-top:14px">
+    <a class="btn blue sm" href="{{ url_for('new_topic', number=c.number) }}">+ Add a topic</a>
+    {% if ai_ready %}<a class="btn sm" href="{{ url_for('new_topic', number=c.number, via='ai') }}">&#10022; Add a topic with AI</a>{% endif %}
+  </p>
+
+  <form method="post" action="{{ url_for('delete_chapter', number=c.number) }}" style="margin-top:40px"
+        onsubmit="return confirm('Delete chapter {{ c.number }} with all its topics and questions? This cannot be undone.')">
     <button class="btn danger" type="submit">Delete chapter {{ c.number }}</button>
   </form>
   {% endif %}
 </div></main>
+{% endblock %}
+
+{% block scripts %}
+{% if ai_ready %}
+<script src="{{ url_for('static', filename='ai.js') }}"></script>
+<script>
+AI.wireButtons({
+  url: '{{ url_for("ai_refine") }}',
+  extra: () => ({chapter: {{ c.number if c else 'null' }}}),
+});
+</script>
+{% endif %}
 {% endblock %}

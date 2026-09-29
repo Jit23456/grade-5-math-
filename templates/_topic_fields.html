@@ -1,0 +1,50 @@
+{# The lesson brief. The AI assistant writes the lesson and the questions from
+   these fields, so the more of them a teacher fills, the closer the draft. #}
+{% macro fields(t, LEVELS) %}
+<div class="field"><label for="f_title">Topic title <span class="req">required</span></label>
+  <p class="hint">What students will see as the lesson heading.</p>
+  <input id="f_title" type="text" name="title" required value="{{ t.title if t else '' }}"
+         placeholder="e.g. Rounding decimals to the nearest tenth"></div>
+
+<div class="field"><label for="f_objective">Learning objective</label>
+  <p class="hint">One sentence: what students will be able to do by the end.</p>
+  <input id="f_objective" type="text" name="objective" value="{{ t.objective if t else '' }}"
+         placeholder="Students will round decimals to the nearest tenth and whole number"></div>
+
+<div class="field"><label for="f_criteria">Success criteria</label>
+  <p class="hint">One per line, as &ldquo;I can&hellip;&rdquo; statements. The assessment questions are spread across these.</p>
+  <textarea id="f_criteria" name="criteria_text" rows="4"
+            placeholder="I can find the tenths digit in a decimal&#10;I can decide whether to round up or down">{{ t.criteria_text if t else '' }}</textarea></div>
+
+<div class="row">
+  <div class="field"><label for="f_prior">Prior knowledge</label>
+    <p class="hint">What students should already know.</p>
+    <textarea id="f_prior" name="prior_knowledge" rows="3">{{ t.prior_knowledge if t else '' }}</textarea></div>
+  <div class="field"><label for="f_mis">Common misconceptions</label>
+    <p class="hint">Mistakes to tackle. They become the wrong options in questions.</p>
+    <textarea id="f_mis" name="misconceptions" rows="3">{{ t.misconceptions if t else '' }}</textarea></div>
+</div>
+
+<div class="field"><label for="f_vocab">Key vocabulary</label>
+  <p class="hint">One per line, in the form <code>Term | meaning</code>.</p>
+  <textarea id="f_vocab" name="vocab_text" rows="4">{{ t.vocab_text if t else '' }}</textarea></div>
+
+<div class="field"><label for="f_context">Real-world context</label>
+  <p class="hint">A setting for the examples, e.g. a class fundraiser, hockey stats, a trip to Tofino.</p>
+  <input id="f_context" type="text" name="context" value="{{ t.context if t else '' }}"></div>
+
+<div class="row">
+  <div class="field"><label for="f_level">Level</label>
+    <select id="f_level" name="level">
+      {% for k, v in LEVELS.items() %}
+      <option value="{{ k }}" {% if (t.level if t else 'core') == k %}selected{% endif %}>{{ v[0] }}: {{ v[1] }}</option>
+      {% endfor %}
+    </select></div>
+  <div class="field"><label for="f_duration">Lesson length (minutes)</label>
+    <input id="f_duration" type="number" name="duration" min="5" max="240" value="{{ t.duration if t else 45 }}"></div>
+</div>
+
+<div class="field"><label for="f_notes">Notes for the assistant (optional)</label>
+  <p class="hint">Anything else: resources you use, what to leave out, how your class learns best.</p>
+  <textarea id="f_notes" name="notes" rows="2">{{ t.notes if t else '' }}</textarea></div>
+{% endmacro %}

@@ -3,9 +3,14 @@
 A small web application for the British Columbia Grade 5 Mathematics curriculum.
 
 - An **index page** lists all 19 chapters, grouped by Big Idea strand.
-- Each chapter has **its own page** with lessons, worked examples and a self-scoring assessment.
-- Teachers sign in to **write chapters and questions by hand**.
-- An **AI assistant** drafts lessons, questions, explanations and vocabulary for a teacher to review.
+- Each chapter has **its own page** of lessons (topics), ending in a button that
+  opens the chapter's **self-scoring assessment on a page of its own**.
+- Teachers sign in to **write chapters, topics and questions by hand**.
+- Each topic carries a **lesson brief** (objective, success criteria, prior knowledge,
+  vocabulary, misconceptions, context, level, length) that the **AI assistant** writes
+  the lesson and its questions from.
+- Everything is a **draft** until a teacher publishes it: preview it as a student will
+  see it, edit it by hand, or ask the assistant to **refine** it first.
 - Every piece of content is **labelled with its origin**: curriculum, teacher written, or AI draft.
 
 The 19 chapters, 77 lessons and 380 questions are seeded from the BC learning
@@ -99,7 +104,7 @@ so no separate setup step is needed.
 
 ```bash
 cd app
-gunicorn -w 4 -b 0.0.0.0:8000 wsgi:application
+gunicorn -w 4 --threads 4 --timeout 180 -b 0.0.0.0:8000 wsgi:application
 ```
 
 **waitress** (works on Windows)
@@ -151,7 +156,7 @@ User=www-data
 WorkingDirectory=/srv/math5/app
 Environment="MATH5_SECRET_KEY=change-me"
 Environment="GROQ_API_KEY=gsk_..."
-ExecStart=/srv/math5/venv/bin/gunicorn -w 4 -b 127.0.0.1:8000 wsgi:application
+ExecStart=/srv/math5/venv/bin/gunicorn -w 4 --threads 4 --timeout 180 -b 127.0.0.1:8000 wsgi:application
 Restart=on-failure
 
 [Install]
@@ -202,8 +207,11 @@ Useful places to start reading:
 |---|---|
 | `app.py` | Every route, the database schema, and the AI assistant calls |
 | `templates/index.html` | The chapter index |
-| `templates/chapter.html` | A chapter page and the browser-side quiz marking |
-| `templates/assistant.html` | The AI assistant screen |
+| `templates/chapter.html` | A chapter page: its lessons, and the way to the assessment |
+| `templates/assessment.html` | A chapter's assessment and the browser-side quiz marking |
+| `templates/assistant.html` | Step one of the AI flow: pick a chapter and a topic |
+| `templates/topic_studio.html` | The topic workspace: brief, lesson, questions, preview and publish |
+| `static/ai.js` | Request helpers and the "Refine with AI" panel shared by the teacher pages |
 | `static/style.css` | All the styling, with the palette in `:root` at the top |
 | `data/seed.json` | The 19 chapters, 77 lessons and 380 questions, with their diagrams |
 | `scripts/viz.py` | The inline-SVG diagram generators (number lines, grids, clocks, charts) |
@@ -237,19 +245,31 @@ already in `.gitignore`.
 
 ## The AI assistant
 
-At `/teacher/assistant`. Choose what you need, describe the topic, and the
-assistant returns a draft. Five kinds of help:
+At `/teacher/assistant`. The assistant works on one topic at a time, in steps:
 
-| Kind | Returns |
+| Step | What happens |
 |---|---|
-| Lesson | A `### Lesson n.n` block with a worked example and a "Watch out" note, in the same shape as the seeded chapters |
-| Questions | Multiple choice, multi-select and fill-in-the-blank questions with answer keys and explanations |
-| Explanation | A short explanation for a teacher to read aloud |
-| Vocabulary | Six to eight terms with plain-language meanings |
-| Rewrite | Your own text rewritten in simpler language, with the mathematics unchanged |
+| 1. Chapter | Pick the chapter. Its standard, Big Idea and goals go into every request. |
+| 2. Topic brief | Pick a topic or start a new one, and describe it: objective, success criteria, prior knowledge, vocabulary, misconceptions, real-world context, level and length. **Fill empty fields with AI** suggests the rest from the title. |
+| 3. Lesson | **Write the lesson from the brief.** Switch between Edit and Preview, edit by hand, or refine with a quick instruction ("Simpler language", "Add a worked example") or your own. Every change can be undone. |
+| 4. Assessment | **Write questions with AI**: choose how many, which types and the difficulty. They are saved as drafts on the topic. Each one can be edited in place, refined with AI ("Make it harder", "Better wrong answers"), made live, or deleted. |
+| 5. Preview & publish | A checklist, a preview of the lesson, links to the student view of the chapter and the assessment, then **Publish**. |
 
-Nothing is saved until you read the draft and press save. Saved content is tagged
-`ai`, and the chapter page shows an "AI draft" label beside it.
+Students see nothing of a topic until it is published, and nothing of a question
+until it is live. Later edits to a published topic stay in its draft until you
+publish again, so a half-finished change never reaches a class.
+
+The same workspace opens from the chapter editor for hand editing, and every
+refine button is available there too. The chapter editor has **Refine with AI** under
+the summary, goals, vocabulary, introduction and summary points, and the question
+editor has a refine panel that works on whatever is in the form.
+
+A refinement is always shown as a suggestion first: nothing changes until you press
+**Use this**. Content the assistant wrote or refined is labelled "AI draft".
+
+On Groq's free plan the model allows a limited number of tokens per minute. When
+the limit is hit the app waits and retries once if the wait is short, and otherwise
+tells the teacher how long to wait.
 
 **Check the mathematics.** Language models get arithmetic wrong sometimes. Work
 through every calculation and every answer key before putting a draft in front of
@@ -280,14 +300,18 @@ so a reader can see it no longer matches the seeded text.
 
 ## Writing a chapter
 
-From the dashboard, **Add chapter**. Only the number and title are required.
+From the dashboard, **Add chapter**. Only the number and title are required. Then
+add its topics from the **Topics in this chapter** list under the form; each topic
+is one lesson, with its own brief, text and questions. Topics can be reordered with
+the arrows.
 
-The lessons field takes Markdown:
+Lesson text takes Markdown. The lesson title is added for you, so start with the
+content:
 
 ```markdown
-### Lesson 4.1 - A short title
-
 A sentence or two stating the concept plainly.
+
+#### Worked example
 
 ​```
 A worked example, laid out step by step
@@ -308,7 +332,13 @@ the same styling as the seeded chapters. Learning goals, vocabulary and summary
 points are one per line; vocabulary uses `Term | meaning`.
 
 Unpublished chapters are hidden from the index and return 404 to visitors, while
-signed-in teachers can still open them to keep working.
+signed-in teachers can still open them to keep working. A signed-in teacher can add
+`?preview=1` to a chapter or assessment page (or press **Preview drafts**) to see the
+unpublished topics and draft questions as a student would.
+
+Chapters from before topics existed kept every lesson in one field. On startup
+each `### Lesson` block in such a chapter becomes a published topic, and any text
+before the first lesson stays as the chapter introduction.
 
 ---
 
@@ -333,7 +363,8 @@ attempt data is sent to the server or stored.
 | Route | Who | What |
 |---|---|---|
 | `/` | anyone | Chapter index and standards checklist |
-| `/chapter/<n>` | anyone | One chapter, with its assessment |
+| `/chapter/<n>` | anyone | One chapter's lessons |
+| `/chapter/<n>/assessment` | anyone | That chapter's assessment |
 | `/api/course.json` | anyone | The whole course as JSON |
 | `/healthz` | anyone | Status, chapter count, whether the AI is configured |
 | `/login`, `/logout` | anyone | Teacher sign in, by mobile number or username |
@@ -343,8 +374,11 @@ attempt data is sent to the server or stored.
 | `/teacher/chapter/new`, `/teacher/chapter/<n>/edit` | teacher | Chapter editor |
 | `/teacher/chapter/<n>/questions` | teacher | Question list |
 | `/teacher/chapter/<n>/question/new` | teacher | Question editor |
-| `/teacher/assistant` | teacher | AI assistant |
-| `/api/ai/generate`, `/api/ai/accept` | teacher | Assistant endpoints |
+| `/teacher/assistant` | teacher | AI assistant, step one |
+| `/teacher/chapter/<n>/topic/new` | teacher | Describe a new topic |
+| `/teacher/topic/<id>` | teacher | Topic workspace; `/publish`, `/unpublish`, `/delete`, `/move` act on it |
+| `/api/topic/<id>/save`, `/api/question/<id>/save`, `/status`, `/delete`, `/api/render` | teacher | Workspace saves and Markdown preview |
+| `/api/ai/brief`, `/api/ai/topic/<id>/lesson`, `/api/ai/topic/<id>/questions`, `/api/ai/refine`, `/api/ai/refine-question` | teacher | Assistant endpoints |
 | `/teacher/password` | teacher | Change your own password |
 | `/teacher/users/new` | **admin** | Create a teacher account |
 | `/teacher/users/<id>/delete` | **admin** | Remove a teacher account |
